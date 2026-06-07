@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import urllib.parse
 from collections.abc import Callable
@@ -24,6 +25,9 @@ CITATION_PDF_META = re.compile(
     r"<meta\b(?=[^>]*\bname=[\"']citation_pdf_url[\"'])"
     r"[^>]*\bcontent=[\"'](?P<url>[^\"']+)[\"']",
     re.IGNORECASE,
+)
+DOI_PATTERN = re.compile(
+    r"^(?:doi:)?(10\.\d{4,9}/[-._;()/:A-Z0-9]+)$", re.IGNORECASE
 )
 
 
@@ -172,6 +176,95 @@ def _resolve_url(
     }
 
 
+def _looks_like_doi(value: str) -> bool:
+    return bool(DOI_PATTERN.match(value.strip()))
+
+
+def _normalize_doi(value: str) -> str:
+    match = DOI_PATTERN.match(value.strip())
+    if not match:
+        raise ValueError(f"not a valid DOI: {value}")
+    return match.group(1).lower()
+
+
+def _resolve_via_unpaywall(
+    doi: str, client, output_dir: Path
+) -> dict[str, Any] | None:
+    email = os.environ.get("UNPAYWALL_EMAIL")
+    if not email:
+        return None
+    response = client.get(
+        f"https://api.unpaywall.org/v2/{doi}?email={email}"
+    )
+    if response.status_code >= 400:
+        return None
+    payload = response.json()
+    best = payload.get("best_oa_location") or {}
+    pdf_url = best.get("url_for_pdf")
+    if not pdf_url:
+        return None
+    pdf_response = client.get(pdf_url)
+    if not _is_pdf_response(pdf_response):
+        return None
+    saved = _save_pdf_bytes(output_dir, pdf_url, pdf_response.content)
+    return {
+        "pdf_path": str(saved.resolve()),
+        "source_url": pdf_url,
+        "sha256": _sha256_bytes(pdf_response.content),
+    }
+
+
+def _resolve_doi(
+    doi: str,
+    output_dir: Path,
+    http_client_factory: Callable[[], Any],
+) -> dict[str, Any]:
+    normalized = _normalize_doi(doi)
+    doi_url = f"https://doi.org/{normalized}"
+    with http_client_factory() as client:
+        response = client.get(doi_url)
+        if _is_pdf_response(response):
+            saved = _save_pdf_bytes(
+                output_dir, doi_url, response.content
+            )
+            return {
+                "pdf_path": str(saved.resolve()),
+                "resolution_path": ["doi"],
+                "source_url": doi_url,
+                "retrieved_at": _utc_now_iso(),
+                "sha256": _sha256_bytes(response.content),
+                "unresolved": None,
+            }
+        upgrade = _resolve_via_unpaywall(normalized, client, output_dir)
+        if upgrade:
+            return {
+                "pdf_path": upgrade["pdf_path"],
+                "resolution_path": ["doi", "unpaywall"],
+                "source_url": upgrade["source_url"],
+                "retrieved_at": _utc_now_iso(),
+                "sha256": upgrade["sha256"],
+                "unresolved": None,
+            }
+    if os.environ.get("UNPAYWALL_EMAIL"):
+        message = (
+            "DOI did not resolve to an open-access PDF and Unpaywall "
+            "did not find one"
+        )
+    else:
+        message = (
+            "DOI resolved to a non-PDF response and UNPAYWALL_EMAIL is "
+            "not set; cannot consult Unpaywall"
+        )
+    return {
+        "pdf_path": None,
+        "resolution_path": ["doi"],
+        "source_url": doi_url,
+        "retrieved_at": _utc_now_iso(),
+        "sha256": None,
+        "unresolved": message,
+    }
+
+
 def resolve_input(
     input_value: str,
     output_dir: Path,
@@ -194,7 +287,22 @@ def resolve_input(
             output_dir,
             http_client_factory or _default_http_client,
         )
-    raise NotImplementedError("DOI resolution not yet implemented")
+    if _looks_like_doi(input_value):
+        return _resolve_doi(
+            input_value,
+            output_dir,
+            http_client_factory or _default_http_client,
+        )
+    return {
+        "pdf_path": None,
+        "resolution_path": [],
+        "source_url": None,
+        "retrieved_at": _utc_now_iso(),
+        "sha256": None,
+        "unresolved": (
+            f"input is neither a local PDF, a URL, nor a DOI: {input_value!r}"
+        ),
+    }
 
 
 def fetch(input_value: str, output_dir: Path) -> dict[str, Any]:
