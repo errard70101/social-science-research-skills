@@ -3,21 +3,37 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
-SKILL = ROOT / "skills" / "rename-and-organize-references"
+SKILLS = {
+    "rename-and-organize-references": [
+        "scripts/rename_references.py",
+        "references/mapping-format.md",
+    ],
+    "manage-latex-bibliography": [
+        "scripts/manage_bibliography.py",
+        "references/verification-rules.md",
+        "references/title-case-rules.md",
+    ],
+}
 
 
-def test_skill_has_required_frontmatter():
-    text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
+@pytest.mark.parametrize("name", SKILLS)
+def test_skill_has_required_frontmatter(name):
+    skill = ROOT / "skills" / name
+    text = (skill / "SKILL.md").read_text(encoding="utf-8")
     assert text.startswith("---\n")
-    assert "\nname: rename-and-organize-references\n" in text
+    assert f"\nname: {name}\n" in text
     assert re.search(r"\ndescription: .+\n", text)
 
 
-def test_skill_contains_no_machine_specific_paths():
+@pytest.mark.parametrize("name", SKILLS)
+def test_skill_contains_no_machine_specific_paths(name):
+    skill = ROOT / "skills" / name
     text = "\n".join(
         path.read_text(encoding="utf-8")
-        for path in SKILL.rglob("*")
+        for path in skill.rglob("*")
         if path.is_file() and "__pycache__" not in path.parts
     )
     forbidden = [
@@ -29,11 +45,15 @@ def test_skill_contains_no_machine_specific_paths():
     assert all(value not in text for value in forbidden)
 
 
-def test_skill_references_existing_bundled_files():
-    text = (SKILL / "SKILL.md").read_text(encoding="utf-8")
-    expected = [
-        "scripts/rename_references.py",
-        "references/mapping-format.md",
-    ]
+@pytest.mark.parametrize(("name", "expected"), SKILLS.items())
+def test_skill_references_existing_bundled_files(name, expected):
+    skill = ROOT / "skills" / name
+    text = (skill / "SKILL.md").read_text(encoding="utf-8")
     assert all(value in text for value in expected)
-    assert all((SKILL / value).is_file() for value in expected)
+    assert all((skill / value).is_file() for value in expected)
+
+
+def test_bibliography_skill_does_not_bundle_aea_style():
+    skill = ROOT / "skills" / "manage-latex-bibliography"
+
+    assert not list(skill.rglob("aea.bst"))

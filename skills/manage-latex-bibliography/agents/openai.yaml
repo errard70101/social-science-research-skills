@@ -1,0 +1,4 @@
+interface:
+  display_name: "Manage LaTeX Bibliography"
+  short_description: "Verify and maintain LaTeX BibTeX entries"
+  default_prompt: "Use $manage-latex-bibliography to scan my LaTeX project, verify missing references, and propose safe bibliography updates."
