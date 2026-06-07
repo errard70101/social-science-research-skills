@@ -59,7 +59,8 @@ def test_extract_records_per_page_text(
 
     assert artifact["schema_version"] == 1
     assert artifact["page_count"] == 3
-    assert artifact["pages"][0] == {"page": 1, "text": "Page one body.\n\nJane Author, John Author"}
+    expected_page_0 = {"page": 1, "text": "Page one body.\n\nJane Author, John Author"}
+    assert artifact["pages"][0] == expected_page_0
     assert artifact["pages"][2] == {"page": 3, "text": ""}
     assert artifact["embedded_metadata"] == {
         "/Title": "Stub Title",
