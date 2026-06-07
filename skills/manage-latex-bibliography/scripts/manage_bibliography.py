@@ -826,6 +826,32 @@ def _require_exact_fields(
         )
 
 
+def _has_balanced_braces(value: str) -> bool:
+    depth = 0
+    for index, character in enumerate(value):
+        if _is_escaped(value, index):
+            continue
+        if character == "{":
+            depth += 1
+        elif character == "}":
+            depth -= 1
+            if depth < 0:
+                return False
+    return depth == 0
+
+
+def _validate_bibtex_fields(fields: dict[object, object], label: str) -> None:
+    for name, value in fields.items():
+        if not isinstance(name, str) or not re.fullmatch(
+            r"[a-z][a-z0-9_-]*", name
+        ):
+            raise ValueError(f"{label} has invalid BibTeX field name: {name}")
+        if not isinstance(value, str):
+            raise ValueError(f"{label} BibTeX field values must be strings")
+        if not _has_balanced_braces(value):
+            raise ValueError(f"{label} BibTeX field values require balanced braces")
+
+
 def validate_entry(
     entry: object, label: str = "entry", *, correction: bool = False
 ) -> None:
@@ -847,6 +873,11 @@ def validate_entry(
         raise ValueError(f"{label} fields must be an object")
     if status == "rejected":
         return
+    if not re.fullmatch(r"[a-z][a-z0-9]*", entry["citation_key"]):
+        raise ValueError(f"{label} has invalid citation key")
+    _validate_bibtex_fields(fields, label)
+    if correction:
+        _validate_bibtex_fields(entry["before_fields"], f"{label} before_fields")
 
     entry_type = entry["entry_type"]
     if entry_type not in SUPPORTED_ENTRY_TYPES:

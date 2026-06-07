@@ -526,3 +526,34 @@ def test_validate_cli_loads_and_validates_json(bibliography_module, tmp_path):
     )
 
     assert bibliography_module.main(["validate", "--proposal", str(proposal_path)]) == 0
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (lambda entry: entry.update(citation_key="Doe2024"), "citation key"),
+        (
+            lambda entry: entry["fields"].update({"bad field": "value"}),
+            "field name",
+        ),
+        (
+            lambda entry: entry["fields"].update({"volume": 1}),
+            "field values",
+        ),
+        (
+            lambda entry: entry["fields"].update({"title": "Unbalanced {Title"}),
+            "balanced braces",
+        ),
+    ],
+)
+def test_validate_rejects_entries_that_cannot_render_safe_bibtex(
+    bibliography_module, tmp_path, mutation, message
+):
+    project, _ = write_project(tmp_path, "\\documentclass{article}\n")
+    proposal = bibliography_module.build_scan_proposal(project)
+    entry = accepted_entry()
+    mutation(entry)
+    proposal["new_entries"] = [entry]
+
+    with pytest.raises(ValueError, match=message):
+        bibliography_module.validate_proposal(proposal)

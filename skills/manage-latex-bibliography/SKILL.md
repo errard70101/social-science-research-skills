@@ -50,6 +50,16 @@ description: Use when a LaTeX project needs a new or updated BibTeX bibliography
 
 Re-run `scan` whenever a tracked `.tex` or `.bib` file changes.
 
+## Entry Rules
+
+Use lowercase `authorYearFirstTitleWord` citation keys, for example
+`acemoglu2001colonial`. Skip title stop words. If the key collides with another
+work, append the next meaningful title word; do not add an arbitrary numeric
+suffix.
+
+Use lowercase BibTeX field names and string field values. Keep braces balanced
+and protect case-sensitive title content before validation.
+
 ## Inferred References
 
 The agent may identify author-year mentions, titles, DOI strings, or other
@@ -84,4 +94,3 @@ entries but do not activate `aea.bst` or convert the project.
 - Do not bypass duplicate identifier, stale digest, project containment,
   archive, or overwrite failures.
 - Do not add `aea.bst` or downloaded AEA files to this skill or repository.
-
