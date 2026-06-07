@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 import unicodedata
 import urllib.parse
 import urllib.request
@@ -455,6 +456,138 @@ def propose(
     return mapping
 
 
+def contained_path(root: Path, relative: str) -> Path | None:
+    if not isinstance(relative, str) or not relative:
+        return None
+    relative_path = Path(relative)
+    if (
+        relative_path.is_absolute()
+        or relative_path == Path(".")
+        or ".." in relative_path.parts
+    ):
+        return None
+    try:
+        resolved_root = root.resolve()
+        candidate = (resolved_root / relative_path).resolve()
+        candidate.relative_to(resolved_root)
+    except (OSError, RuntimeError, ValueError):
+        return None
+    return candidate
+
+
+def validate_mapping(data: Mapping[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if not isinstance(data, Mapping):
+        return ["mapping must be an object"]
+
+    schema_version = data.get("schema_version")
+    if type(schema_version) is not int or schema_version != 1:
+        errors.append("schema_version must equal 1")
+
+    root_value = data.get("root")
+    if not isinstance(root_value, str) or not root_value.strip():
+        errors.append("root must be a nonempty string")
+        return errors
+    try:
+        root = Path(root_value).expanduser().resolve()
+    except (OSError, RuntimeError, ValueError):
+        errors.append(f"root is invalid: {root_value}")
+        return errors
+    try:
+        root_is_dir = root.is_dir()
+    except (OSError, ValueError):
+        root_is_dir = False
+    if not root_is_dir:
+        errors.append(f"root is not a directory: {root}")
+
+    unresolved = data.get("unresolved", [])
+    if unresolved != []:
+        errors.append("mapping contains unresolved items")
+
+    items = data.get("items")
+    if not isinstance(items, list):
+        errors.append("items must be a list")
+        return errors
+
+    sources: set[Path] = set()
+    destinations: set[Path] = set()
+    valid_items: list[tuple[int, Mapping[str, Any], Path, Path]] = []
+    for index, item in enumerate(items):
+        if not isinstance(item, Mapping):
+            errors.append(f"item {index} must be an object")
+            continue
+
+        if item.get("confidence") != "high":
+            errors.append(f"item {index} confidence must be high")
+        kind = item.get("kind")
+        if not isinstance(kind, str) or kind not in KIND_SUFFIXES:
+            errors.append(f"item {index} has unsupported kind: {kind}")
+
+        source_value = item.get("source")
+        destination_value = item.get("destination")
+        source = (
+            contained_path(root, source_value)
+            if isinstance(source_value, str)
+            else None
+        )
+        destination = (
+            contained_path(root, destination_value)
+            if isinstance(destination_value, str)
+            else None
+        )
+        if source is None:
+            errors.append(f"item {index} source must be a nonempty path within root")
+        if destination is None:
+            errors.append(
+                f"item {index} destination must be a nonempty path within root"
+            )
+        if source is None or destination is None:
+            continue
+
+        if source == destination:
+            errors.append(f"item {index} source and destination must differ")
+        if source in sources:
+            errors.append(f"duplicate source: {source_value}")
+        if destination in destinations:
+            errors.append(f"duplicate destination: {destination_value}")
+        sources.add(source)
+        destinations.add(destination)
+        valid_items.append((index, item, source, destination))
+
+        if not source.exists():
+            errors.append(f"source does not exist: {source_value}")
+
+    for _, item, _, destination in valid_items:
+        if destination in sources:
+            errors.append(
+                f"destination is another source: {item.get('destination')}"
+            )
+        elif destination.exists():
+            errors.append(
+                f"destination already exists: {item.get('destination')}"
+            )
+
+    for _, item, source, _ in valid_items:
+        if not source.is_dir():
+            continue
+        for _, _, _, destination in valid_items:
+            if source == destination:
+                continue
+            try:
+                destination.relative_to(source)
+            except ValueError:
+                continue
+            errors.append(
+                f"directory destination overlaps source: {item.get('source')}"
+            )
+
+    return errors
+
+
+def load_mapping(path: Path) -> dict[str, Any]:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Propose, validate, and apply academic reference renames."
@@ -468,6 +601,8 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Disable OpenAlex metadata lookups.",
     )
+    validate_parser = subparsers.add_parser("validate")
+    validate_parser.add_argument("--mapping", required=True, type=Path)
     return parser
 
 
@@ -476,6 +611,18 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "propose":
         provider = None if args.offline else OpenAlexProvider()
         propose(args.directory, args.output, provider=provider)
+    if args.command == "validate":
+        try:
+            data = load_mapping(args.mapping)
+        except (OSError, json.JSONDecodeError) as error:
+            print(f"ERROR: unable to load mapping: {error}", file=sys.stderr)
+            return 1
+        errors = validate_mapping(data)
+        if errors:
+            for error in errors:
+                print(f"ERROR: {error}", file=sys.stderr)
+            return 1
+        print("Mapping is valid.")
     return 0
 
 
