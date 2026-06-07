@@ -83,6 +83,12 @@ def test_parse_bibtex_rejects_unbalanced_entries(bibliography_module, text):
         ("https://doi.org/10.1000/ABC,", "10.1000/abc"),
         ("http://dx.doi.org/10.1000/ABC;", "10.1000/abc"),
         (" DOI: 10.1000/ABC ", "10.1000/abc"),
+        ("https://doi.org/10.1000/ABC).", "10.1000/abc"),
+        ("doi:10.1000/ABC]};", "10.1000/abc"),
+        (
+            "doi:10.1000/ABC(DEF):part",
+            "10.1000/abc(def):part",
+        ),
     ],
 )
 def test_normalize_doi_removes_prefixes_and_trailing_punctuation(

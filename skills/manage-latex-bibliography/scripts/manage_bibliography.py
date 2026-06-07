@@ -286,7 +286,7 @@ def parse_bibtex_entries(text: str) -> list[dict[str, object]]:
 
 def normalize_doi(value: str) -> str:
     normalized = DOI_PREFIX_RE.sub("", value.strip())
-    return normalized.rstrip(".,;:").strip().lower()
+    return normalized.rstrip(".,;:)]}").strip().lower()
 
 
 def find_duplicate_identifiers(entries: list[dict[str, object]]) -> list[str]:
