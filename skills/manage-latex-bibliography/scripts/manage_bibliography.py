@@ -20,12 +20,15 @@ CITATION_COMMAND_RE = re.compile(
 )
 BIBLIOGRAPHY_RE = re.compile(r"\\bibliography\s*\{([^{}]*)\}")
 BIBLIOGRAPHY_STYLE_RE = re.compile(r"\\bibliographystyle\s*\{([^{}]*)\}")
-BIBLATEX_PACKAGE_RE = re.compile(r"\\usepackage(?:\s*\[[^\]]*\])?\s*\{\s*biblatex\s*\}")
+USEPACKAGE_RE = re.compile(r"\\usepackage(?:\s*\[[^\]]*\])?\s*\{([^{}]+)\}")
 ADD_BIB_RESOURCE_RE = re.compile(r"\\addbibresource(?:\s*\[[^\]]*\])?\s*\{([^{}]+)\}")
 BIBTEX_ENTRY_RE = re.compile(r"@([A-Za-z][A-Za-z0-9_-]*)\s*([({])")
 DOI_PREFIX_RE = re.compile(
     r"^(?:doi\s*:\s*|https?://(?:dx\.)?doi\.org/)", re.IGNORECASE
 )
+BIBTEX_DIRECTIVES = {"comment", "preamble", "string"}
+TRAILING_DOI_PUNCTUATION = ".,;:"
+DELIMITER_PAIRS = {")": "(", "]": "[", "}": "{"}
 
 
 def _resolve_project_path(path: Path, root: Path) -> tuple[Path, Path]:
@@ -127,8 +130,10 @@ def detect_bibliography(sources: list[Path], root: Path) -> dict[str, object]:
         text = resolved_source.read_text(encoding="utf-8")
         uncommented = "\n".join(strip_tex_comment(line) for line in text.splitlines())
 
-        if BIBLATEX_PACKAGE_RE.search(uncommented):
-            uses_biblatex = True
+        for match in USEPACKAGE_RE.finditer(uncommented):
+            packages = {package.strip() for package in match.group(1).split(",")}
+            if "biblatex" in packages:
+                uses_biblatex = True
 
         for match in ADD_BIB_RESOURCE_RE.finditer(uncommented):
             uses_biblatex = True
@@ -249,16 +254,38 @@ def _strip_outer_value(value: str) -> str:
     return value
 
 
+def _mask_bibtex_comments(text: str) -> str:
+    masked_lines: list[str] = []
+    for line in text.splitlines(keepends=True):
+        content = line.rstrip("\r\n")
+        line_ending = line[len(content) :]
+        comment_start = content.find("%")
+        if comment_start == -1:
+            masked_lines.append(line)
+        else:
+            masked_lines.append(
+                content[:comment_start]
+                + " " * (len(content) - comment_start)
+                + line_ending
+            )
+    return "".join(masked_lines)
+
+
 def parse_bibtex_entries(text: str) -> list[dict[str, object]]:
     entries: list[dict[str, object]] = []
+    searchable_text = _mask_bibtex_comments(text)
     search_start = 0
 
-    while match := BIBTEX_ENTRY_RE.search(text, search_start):
+    while match := BIBTEX_ENTRY_RE.search(searchable_text, search_start):
         entry_start = match.start()
         opener = match.group(2)
         opener_index = match.end() - 1
-        entry_end = _find_entry_end(text, opener_index, opener)
-        parts = _split_bibtex_parts(text[opener_index + 1 : entry_end])
+        entry_end = _find_entry_end(searchable_text, opener_index, opener)
+        search_start = entry_end + 1
+        if match.group(1).lower() in BIBTEX_DIRECTIVES:
+            continue
+
+        parts = _split_bibtex_parts(searchable_text[opener_index + 1 : entry_end])
         key = parts[0].strip()
         fields: dict[str, str] = {}
 
@@ -279,14 +306,24 @@ def parse_bibtex_entries(text: str) -> list[dict[str, object]]:
                 "end": entry_end,
             }
         )
-        search_start = entry_end + 1
 
     return entries
 
 
+def _strip_unmatched_trailing_delimiters(value: str) -> str:
+    while value and value[-1] in DELIMITER_PAIRS:
+        closer = value[-1]
+        opener = DELIMITER_PAIRS[closer]
+        if value.count(closer) <= value.count(opener):
+            break
+        value = value[:-1].rstrip(TRAILING_DOI_PUNCTUATION)
+    return value
+
+
 def normalize_doi(value: str) -> str:
     normalized = DOI_PREFIX_RE.sub("", value.strip())
-    return normalized.rstrip(".,;:)]}").strip().lower()
+    normalized = normalized.rstrip(TRAILING_DOI_PUNCTUATION).strip()
+    return _strip_unmatched_trailing_delimiters(normalized).lower()
 
 
 def find_duplicate_identifiers(entries: list[dict[str, object]]) -> list[str]:
@@ -305,7 +342,7 @@ def find_duplicate_identifiers(entries: list[dict[str, object]]) -> list[str]:
 
         isbn = fields.get("isbn")
         if isbn:
-            normalized_isbn = str(isbn).strip().lower().replace("-", "")
+            normalized_isbn = re.sub(r"[\s-]+", "", str(isbn).lower())
             identifiers["ISBN"].setdefault(normalized_isbn, set()).add(key)
 
     messages: list[str] = []

@@ -62,6 +62,39 @@ def test_parse_bibtex_supports_multiple_and_parenthesized_entries(
     assert entries[1]["end"] == len(text) - 1
 
 
+def test_parse_bibtex_skips_directives_and_percent_comment_lines(
+    bibliography_module,
+):
+    text = (
+        "@string{journal = {Journal @article{fake, title={Fake}}}}\n"
+        '@preamble{"@book{alsofake, title={Fake}}"}\n'
+        "@comment{Ignored @misc{thirdfake, title={Fake}}}\n"
+        "% @article{commented, title={Commented}}\n"
+        "prefix @article{real, title={Real}} suffix\n"
+    )
+
+    assert bibliography_module.parse_bibtex_entries(text) == [
+        {
+            "type": "article",
+            "key": "real",
+            "fields": {"title": "Real"},
+            "start": text.index("@article{real"),
+            "end": text.index("} suffix"),
+        }
+    ]
+
+
+def test_parse_bibtex_preserves_indexes_after_inline_percent_comment(
+    bibliography_module,
+):
+    text = "text % @article{ignored, title={Ignored}}\n@book{kept, title={Kept}}\n"
+
+    entry = bibliography_module.parse_bibtex_entries(text)[0]
+
+    assert entry["start"] == text.index("@book")
+    assert entry["end"] == text.rindex("}")
+
+
 @pytest.mark.parametrize(
     "text",
     [
@@ -85,6 +118,9 @@ def test_parse_bibtex_rejects_unbalanced_entries(bibliography_module, text):
         (" DOI: 10.1000/ABC ", "10.1000/abc"),
         ("https://doi.org/10.1000/ABC).", "10.1000/abc"),
         ("doi:10.1000/ABC]};", "10.1000/abc"),
+        ("doi:10.1000/foo(bar)", "10.1000/foo(bar)"),
+        ("doi:10.1000/foo(bar)).", "10.1000/foo(bar)"),
+        ("doi:10.1000/foo[bar]];", "10.1000/foo[bar]"),
         (
             "doi:10.1000/ABC(DEF):part",
             "10.1000/abc(def):part",
@@ -105,7 +141,7 @@ def test_find_duplicate_identifiers_normalizes_doi_and_isbn(
             "key": "two",
             "fields": {
                 "doi": "https://doi.org/10.1000/ABC.",
-                "isbn": "978-1-4028-9462-6",
+                "isbn": "978-1 4028 9462-6",
             },
         },
         {

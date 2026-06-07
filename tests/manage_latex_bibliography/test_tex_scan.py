@@ -217,6 +217,22 @@ def test_detect_bibliography_finds_biblatex_with_optional_arguments(
     }
 
 
+def test_detect_bibliography_finds_biblatex_in_package_list(
+    bibliography_module, tmp_path
+):
+    main = tmp_path / "main.tex"
+    main.write_text(
+        "\\usepackage[backend=biber]{foo, biblatex, bar}\n",
+        encoding="utf-8",
+    )
+
+    assert bibliography_module.detect_bibliography([main], tmp_path) == {
+        "system": "biblatex",
+        "targets": [],
+        "styles": [],
+    }
+
+
 def test_detect_bibliography_resolves_targets_from_declaring_source(
     bibliography_module, tmp_path
 ):
