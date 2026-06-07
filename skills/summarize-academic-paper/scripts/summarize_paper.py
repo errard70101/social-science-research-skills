@@ -509,6 +509,35 @@ PAPER_REQUIRED_FIELDS = (
 )
 VALID_VISUAL_KINDS = {"none", "image", "table"}
 
+RUBRIC_BANDS: dict[str, tuple[int, int]] = {
+    "one_sentence": (20, 35),
+    "setup": (60, 120),
+    "empirical_strategy": (90, 160),
+    "identification_cartoon": (90, 160),
+    "key_result": (50, 110),
+    "placement_in_literature": (90, 160),
+    "limitations": (50, 100),
+    "followups": (50, 100),
+}
+RUBRIC_TOLERANCE = 0.25
+
+
+def _word_count(text: str) -> int:
+    return len(text.split())
+
+
+def _rubric_warnings(content: dict[str, Any]) -> list[str]:
+    warnings: list[str] = []
+    for section, (low, high) in RUBRIC_BANDS.items():
+        words = _word_count(content[section])
+        low_threshold = int(low * (1 - RUBRIC_TOLERANCE))
+        high_threshold = int(high * (1 + RUBRIC_TOLERANCE))
+        if words < low_threshold or words > high_threshold:
+            warnings.append(
+                f"{section} has {words} words; rubric band is {low}-{high}"
+            )
+    return warnings
+
 
 def validate_content(content: dict[str, Any]) -> None:
     if content.get("schema_version") != 1:
@@ -774,7 +803,7 @@ def render(
     return {
         "schema_version": 1,
         "output_tex": str(output_tex.resolve()),
-        "warnings": [],
+        "warnings": _rubric_warnings(content),
     }
 
 
