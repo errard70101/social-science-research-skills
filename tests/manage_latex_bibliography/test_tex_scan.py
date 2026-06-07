@@ -180,3 +180,81 @@ def test_scan_citations_rejects_source_outside_project(bibliography_module, tmp_
 
     with pytest.raises(ValueError, match="outside project root"):
         bibliography_module.scan_citations(source, project)
+
+
+def test_detect_bibliography_finds_bibtex_targets_and_style(
+    bibliography_module, tmp_path
+):
+    main = tmp_path / "main.tex"
+    main.write_text(
+        "\\bibliography{refs, extra.bib}\n"
+        "\\bibliographystyle{aea}\n"
+        "% \\addbibresource{ignored.bib}\n",
+        encoding="utf-8",
+    )
+
+    assert bibliography_module.detect_bibliography([main], tmp_path) == {
+        "system": "bibtex",
+        "targets": ["extra.bib", "refs.bib"],
+        "styles": ["aea"],
+    }
+
+
+def test_detect_bibliography_finds_biblatex_with_optional_arguments(
+    bibliography_module, tmp_path
+):
+    main = tmp_path / "main.tex"
+    main.write_text(
+        "\\usepackage[backend=biber]{biblatex}\n"
+        "\\addbibresource[location=local]{library.bib}\n",
+        encoding="utf-8",
+    )
+
+    assert bibliography_module.detect_bibliography([main], tmp_path) == {
+        "system": "biblatex",
+        "targets": ["library.bib"],
+        "styles": [],
+    }
+
+
+def test_detect_bibliography_resolves_targets_from_declaring_source(
+    bibliography_module, tmp_path
+):
+    sections = tmp_path / "sections"
+    sections.mkdir()
+    main = tmp_path / "main.tex"
+    chapter = sections / "chapter.tex"
+    main.write_text("\\bibliographystyle{plain}\n", encoding="utf-8")
+    chapter.write_text("\\bibliography{chapter-refs}\n", encoding="utf-8")
+
+    assert bibliography_module.detect_bibliography([main, chapter], tmp_path) == {
+        "system": "bibtex",
+        "targets": ["sections/chapter-refs.bib"],
+        "styles": ["plain"],
+    }
+
+
+def test_detect_bibliography_prefers_any_biblatex_signal(bibliography_module, tmp_path):
+    main = tmp_path / "main.tex"
+    main.write_text(
+        "\\bibliography{refs}\n\\bibliographystyle{aea}\n\\usepackage{biblatex}\n",
+        encoding="utf-8",
+    )
+
+    assert bibliography_module.detect_bibliography([main], tmp_path) == {
+        "system": "biblatex",
+        "targets": ["refs.bib"],
+        "styles": ["aea"],
+    }
+
+
+def test_detect_bibliography_rejects_target_outside_project(
+    bibliography_module, tmp_path
+):
+    project = tmp_path / "paper"
+    project.mkdir()
+    main = project / "main.tex"
+    main.write_text("\\bibliography{../outside}\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="outside project root"):
+        bibliography_module.detect_bibliography([main], project)
