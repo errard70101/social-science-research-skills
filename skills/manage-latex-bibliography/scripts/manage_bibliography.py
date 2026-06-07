@@ -222,19 +222,19 @@ def scan_citations(source: Path, root: Path) -> list[dict[str, str | int]]:
     citations: list[dict[str, str | int]] = []
 
     text = resolved_source.read_text(encoding="utf-8")
-    for line_number, line in enumerate(text.splitlines(), 1):
-        uncommented = strip_tex_comment(line)
-        for match in CITATION_COMMAND_RE.finditer(uncommented):
-            for raw_key in match.group(1).split(","):
-                key = raw_key.strip()
-                if key:
-                    citations.append(
-                        {
-                            "key": key,
-                            "source": relative_source,
-                            "line": line_number,
-                        }
-                    )
+    uncommented_text = "\n".join(strip_tex_comment(line) for line in text.splitlines())
+    for match in CITATION_COMMAND_RE.finditer(uncommented_text):
+        line_number = uncommented_text.count("\n", 0, match.start()) + 1
+        for raw_key in match.group(1).split(","):
+            key = raw_key.strip()
+            if key:
+                citations.append(
+                    {
+                        "key": key,
+                        "source": relative_source,
+                        "line": line_number,
+                    }
+                )
     return citations
 
 
@@ -673,7 +673,7 @@ def headline_title(value: str) -> str:
         if protected:
             tokens.append((segment, "protected"))
             continue
-        for token in re.findall(r"\s+|[A-Za-z]+(?:['-][A-Za-z]+)*|.", segment):
+        for token in re.findall(r"\s+|[A-Za-z]+(?:'[A-Za-z]+)*|.", segment):
             kind = (
                 "word"
                 if re.fullmatch(r"[A-Za-z]+(?:['-][A-Za-z]+)*", token)
@@ -682,9 +682,7 @@ def headline_title(value: str) -> str:
             tokens.append((token, kind))
 
     word_indexes = [
-        index
-        for index, (_, kind) in enumerate(tokens)
-        if kind in {"word", "protected"}
+        index for index, (_, kind) in enumerate(tokens) if kind in {"word", "protected"}
     ]
     last_word = word_indexes[-1] if word_indexes else -1
     capitalize_next = True
@@ -696,9 +694,7 @@ def headline_title(value: str) -> str:
         elif kind == "word":
             lower = token.lower()
             capitalize = (
-                capitalize_next
-                or index == last_word
-                or lower not in TITLE_STOP_WORDS
+                capitalize_next or index == last_word or lower not in TITLE_STOP_WORDS
             )
             result.append(
                 token[:1].upper() + token[1:].lower() if capitalize else lower
@@ -842,9 +838,7 @@ def _has_balanced_braces(value: str) -> bool:
 
 def _validate_bibtex_fields(fields: dict[object, object], label: str) -> None:
     for name, value in fields.items():
-        if not isinstance(name, str) or not re.fullmatch(
-            r"[a-z][a-z0-9_-]*", name
-        ):
+        if not isinstance(name, str) or not re.fullmatch(r"[a-z][a-z0-9_-]*", name):
             raise ValueError(f"{label} has invalid BibTeX field name: {name}")
         if not isinstance(value, str):
             raise ValueError(f"{label} BibTeX field values must be strings")
@@ -891,11 +885,40 @@ def validate_entry(
         )
 
     if status in {"verified", "approved"}:
-        if not entry["verifier"]:
-            raise ValueError(f"{label} requires a verifier")
-        if not isinstance(entry["sources"], list) or not entry["sources"]:
-            raise ValueError(f"{label} requires sources")
-    if entry["requires_user_approval"] and not entry["user_approval"]:
+        if not isinstance(entry.get("verifier"), str) or not entry["verifier"].strip():
+            raise ValueError(f"{label} requires a nonempty verifier string")
+        sources = entry.get("sources")
+        if not isinstance(sources, list) or not sources:
+            raise ValueError(f"{label} requires a nonempty list of sources")
+        for idx, source in enumerate(sources):
+            if not isinstance(source, dict):
+                raise ValueError(f"{label} source {idx} must be an object")
+            url = source.get("url")
+            if not isinstance(url, str) or not url.startswith("https://"):
+                raise ValueError(f"{label} source {idx} requires a valid HTTPS url")
+            try:
+                parsed_url = urlparse(url)
+                if not parsed_url.netloc:
+                    raise ValueError()
+            except Exception as err:
+                raise ValueError(
+                    f"{label} source {idx} requires a valid HTTPS url"
+                ) from err
+            retrieved_at = source.get("retrieved_at")
+            if not isinstance(retrieved_at, str):
+                raise ValueError(
+                    f"{label} source {idx} requires a retrieved_at timestamp"
+                )
+            try:
+                dt = datetime.fromisoformat(retrieved_at)
+                if dt.tzinfo is None:
+                    raise ValueError("missing timezone")
+            except Exception as err:
+                raise ValueError(
+                    f"{label} source {idx} requires a valid ISO 8601 "
+                    "retrieved_at timestamp with timezone"
+                ) from err
+    if entry.get("requires_user_approval") and not entry.get("user_approval"):
         raise ValueError(f"{label} requires user approval")
 
 
@@ -1025,6 +1048,42 @@ def validate_proposal(proposal: object) -> None:
                 raise ValueError(
                     f"{field}[{index}] has unknown status: {item['status']}"
                 )
+
+    changes = proposal["tex_changes"]
+    if changes:
+        if proposal["bibliography_system"] != "bibtex":
+            raise ValueError("cannot apply BibTeX commands to a biblatex project")
+        if len(changes) != 1:
+            raise ValueError("expected at most one TeX bibliography change")
+
+        change = changes[0]
+        expected_fields = {"file", "status", "action", "commands"}
+        if not isinstance(change, dict) or set(change) != expected_fields:
+            raise ValueError("invalid TeX change schema")
+        if change["status"] != "verified":
+            raise ValueError("TeX change must be verified")
+        if change["action"] != "insert-before-end-document":
+            raise ValueError("unsupported TeX change action")
+        if change["file"] != proposal["main_tex"]:
+            raise ValueError("TeX change must target the main document")
+        commands = change["commands"]
+        if not isinstance(commands, list) or not all(
+            isinstance(command, str) for command in commands
+        ):
+            raise ValueError("TeX change commands must be strings")
+
+        source, _ = _resolve_project_path(root / str(change["file"]), root)
+        expected_commands = ["\\bibliography{references}"]
+        if not detected_bibliography["styles"]:
+            expected_commands.insert(0, "\\bibliographystyle{aea}")
+        if detected_bibliography["targets"] or commands != expected_commands:
+            raise ValueError("bibliography configuration changed since scan")
+
+        text = source.read_text(encoding="utf-8")
+        marker = "\\end{document}"
+        marker_index = text.rfind(marker)
+        if marker_index < 0:
+            raise ValueError(f"missing {marker} in {change['file']}")
 
     new_entries = _validate_entry_group(
         proposal, "new_entries", {"verified", "approved", "rejected"}
@@ -1169,9 +1228,7 @@ def extract_aea_style(data: bytes, project: Path) -> dict[str, str]:
             raise ValueError("AEA template archive has too many entries")
         if sum(member.file_size for member in members) > MAX_UNCOMPRESSED_BYTES:
             raise ValueError("AEA template archive exceeds uncompressed size limit")
-        normalized_names = [
-            member.filename.replace("\\", "/") for member in members
-        ]
+        normalized_names = [member.filename.replace("\\", "/") for member in members]
         if len(normalized_names) != len(set(normalized_names)):
             raise ValueError("duplicate archive member")
         for member in members:
@@ -1230,9 +1287,7 @@ def install_aea_style(
     return result
 
 
-def _accepted_entries(
-    proposal: dict[str, Any], field: str
-) -> list[dict[str, Any]]:
+def _accepted_entries(proposal: dict[str, Any], field: str) -> list[dict[str, Any]]:
     return [
         entry
         for entry in proposal[field]
@@ -1240,47 +1295,17 @@ def _accepted_entries(
     ]
 
 
-def prepare_tex_changes(
-    proposal: dict[str, Any], root: Path
-) -> list[tuple[Path, str]]:
+def prepare_tex_changes(proposal: dict[str, Any], root: Path) -> list[tuple[Path, str]]:
     changes = proposal["tex_changes"]
     if not changes:
         return []
-    if proposal["bibliography_system"] != "bibtex":
-        raise ValueError("cannot apply BibTeX commands to a biblatex project")
-    if len(changes) != 1:
-        raise ValueError("expected at most one TeX bibliography change")
 
     change = changes[0]
-    expected_fields = {"file", "status", "action", "commands"}
-    if not isinstance(change, dict) or set(change) != expected_fields:
-        raise ValueError("invalid TeX change schema")
-    if change["status"] != "verified":
-        raise ValueError("TeX change must be verified")
-    if change["action"] != "insert-before-end-document":
-        raise ValueError("unsupported TeX change action")
-    if change["file"] != proposal["main_tex"]:
-        raise ValueError("TeX change must target the main document")
     commands = change["commands"]
-    if not isinstance(commands, list) or not all(
-        isinstance(command, str) for command in commands
-    ):
-        raise ValueError("TeX change commands must be strings")
-
     source, _ = _resolve_project_path(root / str(change["file"]), root)
-    sources = discover_tex_files(source, root)
-    config = detect_bibliography(sources, root)
-    expected_commands = ["\\bibliography{references}"]
-    if not config["styles"]:
-        expected_commands.insert(0, "\\bibliographystyle{aea}")
-    if config["targets"] or commands != expected_commands:
-        raise ValueError("bibliography configuration changed since scan")
-
     text = source.read_text(encoding="utf-8")
     marker = "\\end{document}"
     marker_index = text.rfind(marker)
-    if marker_index < 0:
-        raise ValueError(f"missing {marker} in {change['file']}")
     prefix = text[:marker_index]
     if prefix and not prefix.endswith("\n"):
         prefix += "\n"
@@ -1301,9 +1326,7 @@ def apply_proposal(proposal: dict[str, Any]) -> dict[str, object]:
     for correction in corrections:
         current = existing_by_key[str(correction["citation_key"])]
         if correction["before_fields"] != current["fields"]:
-            raise ValueError(
-                f"{correction['citation_key']} before_fields do not match"
-            )
+            raise ValueError(f"{correction['citation_key']} before_fields do not match")
     for correction in sorted(
         corrections,
         key=lambda item: int(existing_by_key[str(item["citation_key"])]["start"]),
@@ -1328,42 +1351,109 @@ def apply_proposal(proposal: dict[str, Any]) -> dict[str, object]:
         text += separator + "\n\n".join(render_entry(entry) for entry in additions)
         text += "\n"
 
-    atomic_write(target, text)
-    for source, replacement in prepared_tex:
-        atomic_write(source, replacement)
-    applied = [*corrections, *additions]
-    rejected = [
-        entry
-        for field in (
-            "new_entries",
-            "existing_entry_corrections",
-            "inferred_references",
+    writes = [(target, text)] + prepared_tex
+    temp_paths = []
+    backups = []
+    new_files = []
+    created_temps = []
+    retained_backups = set()
+
+    try:
+        current_umask = os.umask(0)
+        os.umask(current_umask)
+
+        for path, content in writes:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            mode = (
+                path.stat().st_mode & 0o7777
+                if path.exists()
+                else (0o666 & ~current_umask)
+            )
+
+            fd, temp_str = tempfile.mkstemp(
+                dir=path.parent, prefix=f".{path.name}.", text=True
+            )
+            temp_path = Path(temp_str)
+            created_temps.append(temp_path)
+
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(content)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.chmod(temp_path, mode)
+            temp_paths.append((path, temp_path))
+
+        for path, temp_path in temp_paths:
+            if path.exists():
+                fd, backup_str = tempfile.mkstemp(
+                    dir=path.parent, prefix=f".{path.name}.bak."
+                )
+                os.close(fd)
+                backup_path = Path(backup_str)
+                created_temps.append(backup_path)
+
+                os.replace(path, backup_path)
+                backups.append((path, backup_path))
+            else:
+                new_files.append(path)
+            os.replace(temp_path, path)
+
+        applied = [*corrections, *additions]
+        rejected = [
+            entry
+            for field in (
+                "new_entries",
+                "existing_entry_corrections",
+                "inferred_references",
+            )
+            for entry in proposal[field]
+            if entry["status"] == "rejected"
+        ]
+        result: dict[str, object] = {
+            "applied_at": datetime.now(timezone.utc).isoformat(),
+            "applied": [entry["citation_key"] for entry in applied],
+            "applied_entries": [
+                {
+                    "citation_key": entry["citation_key"],
+                    "sources": entry["sources"],
+                    "verifier": entry["verifier"],
+                }
+                for entry in applied
+            ],
+            "skipped": [entry["citation_key"] for entry in rejected],
+            "unresolved": proposal["unresolved"],
+            "verification_report": proposal["verification_report"],
+            "changed_tex": [
+                source.relative_to(root).as_posix() for source, _ in prepared_tex
+            ],
+        }
+        atomic_write(
+            root / "bibliography-apply-result.json",
+            json.dumps(result, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
         )
-        for entry in proposal[field]
-        if entry["status"] == "rejected"
-    ]
-    result: dict[str, object] = {
-        "applied_at": datetime.now(timezone.utc).isoformat(),
-        "applied": [entry["citation_key"] for entry in applied],
-        "applied_entries": [
-            {
-                "citation_key": entry["citation_key"],
-                "sources": entry["sources"],
-                "verifier": entry["verifier"],
-            }
-            for entry in applied
-        ],
-        "skipped": [entry["citation_key"] for entry in rejected],
-        "unresolved": proposal["unresolved"],
-        "verification_report": proposal["verification_report"],
-        "changed_tex": [
-            source.relative_to(root).as_posix() for source, _ in prepared_tex
-        ],
-    }
-    atomic_write(
-        root / "bibliography-apply-result.json",
-        json.dumps(result, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
-    )
+    except Exception as apply_error:
+        for path in new_files:
+            path.unlink(missing_ok=True)
+        rollback_errors = []
+        for path, backup_path in reversed(backups):
+            try:
+                os.replace(backup_path, path)
+            except Exception as rollback_error:
+                retained_backups.add(backup_path)
+                rollback_errors.append((backup_path, rollback_error))
+        if rollback_errors:
+            details = "; ".join(
+                f"{backup_path}: {rollback_error}"
+                for backup_path, rollback_error in rollback_errors
+            )
+            raise RuntimeError(
+                f"rollback failed; backup retained at {details}"
+            ) from apply_error
+        raise
+    finally:
+        for temp_path in created_temps:
+            if temp_path not in retained_backups:
+                temp_path.unlink(missing_ok=True)
     return result
 
 

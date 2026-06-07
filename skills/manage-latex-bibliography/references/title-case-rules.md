@@ -24,4 +24,3 @@ Preserve braces around:
 Add protection only when the publication title and reliable sources support
 the capitalization. The helper performs mechanical headline capitalization;
 the verifier remains responsible for semantic case protection.
-

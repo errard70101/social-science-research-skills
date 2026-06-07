@@ -51,9 +51,7 @@ def test_extract_aea_style_rejects_unsafe_archives(
         bibliography_module.extract_aea_style(archive_bytes(files), tmp_path)
 
 
-def test_extract_aea_style_rejects_duplicate_members(
-    bibliography_module, tmp_path
-):
+def test_extract_aea_style_rejects_duplicate_members(bibliography_module, tmp_path):
     buffer = io.BytesIO()
     with (
         pytest.warns(UserWarning, match="Duplicate name"),
@@ -66,9 +64,7 @@ def test_extract_aea_style_rejects_duplicate_members(
         bibliography_module.extract_aea_style(buffer.getvalue(), tmp_path)
 
 
-def test_extract_aea_style_rejects_symbolic_link(
-    bibliography_module, tmp_path
-):
+def test_extract_aea_style_rejects_symbolic_link(bibliography_module, tmp_path):
     buffer = io.BytesIO()
     link = zipfile.ZipInfo("aea.bst")
     link.create_system = 3
@@ -96,9 +92,7 @@ def test_extract_aea_style_enforces_archive_limits(
     bibliography_module, tmp_path, monkeypatch
 ):
     payload = archive_bytes({"aea.bst": b"style"})
-    monkeypatch.setattr(
-        bibliography_module, "MAX_ARCHIVE_BYTES", len(payload) - 1
-    )
+    monkeypatch.setattr(bibliography_module, "MAX_ARCHIVE_BYTES", len(payload) - 1)
     with pytest.raises(ValueError, match="size limit"):
         bibliography_module.extract_aea_style(payload, tmp_path)
 
@@ -117,9 +111,7 @@ def test_extract_aea_style_enforces_archive_limits(
         )
 
 
-def test_install_requires_official_final_host(
-    bibliography_module, tmp_path
-):
+def test_install_requires_official_final_host(bibliography_module, tmp_path):
     def downloader(url):
         return (
             "https://mirror.example/aea.zip",
@@ -130,9 +122,7 @@ def test_install_requires_official_final_host(
         bibliography_module.install_aea_style(tmp_path, downloader=downloader)
 
 
-def test_install_records_provenance_and_identical_file(
-    bibliography_module, tmp_path
-):
+def test_install_records_provenance_and_identical_file(bibliography_module, tmp_path):
     payload = archive_bytes({"aea.bst": b"style"})
 
     def downloader(url):
@@ -142,12 +132,8 @@ def test_install_records_provenance_and_identical_file(
             payload,
         )
 
-    first = bibliography_module.install_aea_style(
-        tmp_path, downloader=downloader
-    )
-    second = bibliography_module.install_aea_style(
-        tmp_path, downloader=downloader
-    )
+    first = bibliography_module.install_aea_style(tmp_path, downloader=downloader)
+    second = bibliography_module.install_aea_style(tmp_path, downloader=downloader)
 
     assert first["status"] == "installed"
     assert second["status"] == "unchanged"
@@ -170,12 +156,15 @@ def test_confirmed_install_cli_invokes_installer(
 
     monkeypatch.setattr(bibliography_module, "install_aea_style", fake_install)
 
-    assert bibliography_module.main(
-        [
-            "install-aea-style",
-            "--project",
-            str(tmp_path),
-            "--confirm-download",
-        ]
-    ) == 0
+    assert (
+        bibliography_module.main(
+            [
+                "install-aea-style",
+                "--project",
+                str(tmp_path),
+                "--confirm-download",
+            ]
+        )
+        == 0
+    )
     assert calls == [tmp_path]

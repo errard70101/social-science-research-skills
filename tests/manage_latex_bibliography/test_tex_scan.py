@@ -274,3 +274,15 @@ def test_detect_bibliography_rejects_target_outside_project(
 
     with pytest.raises(ValueError, match="outside project root"):
         bibliography_module.detect_bibliography([main], project)
+
+
+def test_scan_citations_supports_multiline_commands_and_keys(
+    bibliography_module, tmp_path
+):
+    source = tmp_path / "main.tex"
+    source.write_text("\\citep{\n  first,\n  second\n}\n")
+
+    assert bibliography_module.scan_citations(source, tmp_path) == [
+        {"key": "first", "source": "main.tex", "line": 1},
+        {"key": "second", "source": "main.tex", "line": 1},
+    ]

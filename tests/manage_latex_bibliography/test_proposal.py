@@ -8,6 +8,8 @@ import pytest
 
 
 def write_project(tmp_path, tex, bib=None):
+    if "\\end{document}" not in tex:
+        tex += "\n\\end{document}\n"
     project = tmp_path / "paper"
     project.mkdir()
     main = project / "main.tex"
@@ -29,7 +31,12 @@ def accepted_entry(key="missing", entry_type="article"):
         "citation_key": key,
         "entry_type": entry_type,
         "fields": fields,
-        "sources": [{"url": "https://example.test/article", "retrieved": "2026-06-08"}],
+        "sources": [
+            {
+                "url": "https://example.test/article",
+                "retrieved_at": "2026-06-08T00:00:00Z",
+            }
+        ],
         "conflicts": [],
         "status": "verified",
         "verifier": "independent-agent",
@@ -544,6 +551,38 @@ def test_validate_cli_loads_and_validates_json(bibliography_module, tmp_path):
             lambda entry: entry["fields"].update({"title": "Unbalanced {Title"}),
             "balanced braces",
         ),
+        (lambda entry: entry.update(verifier=True), "nonempty verifier string"),
+        (lambda entry: entry.update(verifier=" "), "nonempty verifier string"),
+        (lambda entry: entry.update(sources=[]), "nonempty list of sources"),
+        (lambda entry: entry.update(sources=[True]), "must be an object"),
+        (
+            lambda entry: entry["sources"][0].update(url="ftp://bad"),
+            "valid HTTPS url",
+        ),
+        (
+            lambda entry: entry["sources"][0].pop("retrieved_at"),
+            "retrieved_at timestamp",
+        ),
+        (
+            lambda entry: entry["sources"][0].update(retrieved_at=""),
+            "retrieved_at timestamp",
+        ),
+        (
+            lambda entry: entry["sources"][0].update(retrieved_at="invalid"),
+            "retrieved_at timestamp",
+        ),
+        (
+            lambda entry: entry["sources"][0].update(
+                retrieved_at="2024-02-30T10:00:00Z"
+            ),
+            "retrieved_at timestamp",
+        ),
+        (
+            lambda entry: entry["sources"][0].update(
+                retrieved_at="2024-01-01T10:00:00"
+            ),
+            "retrieved_at timestamp",
+        ),
     ],
 )
 def test_validate_rejects_entries_that_cannot_render_safe_bibtex(
@@ -557,3 +596,22 @@ def test_validate_rejects_entries_that_cannot_render_safe_bibtex(
 
     with pytest.raises(ValueError, match=message):
         bibliography_module.validate_proposal(proposal)
+
+
+@pytest.mark.parametrize(
+    "timestamp",
+    [
+        "2024-01-01T10:00:00Z",
+        "2024-01-01T10:00:00+00:00",
+        "2024-01-01T10:00:00-05:00",
+    ],
+)
+def test_validate_accepts_valid_timestamps(bibliography_module, tmp_path, timestamp):
+    project, _ = write_project(tmp_path, "\\documentclass{article}\n")
+    proposal = bibliography_module.build_scan_proposal(project)
+    entry = accepted_entry()
+    entry["sources"][0]["retrieved_at"] = timestamp
+    proposal["new_entries"] = [entry]
+
+    # Should not raise
+    bibliography_module.validate_proposal(proposal)

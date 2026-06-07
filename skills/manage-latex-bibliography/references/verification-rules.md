@@ -49,4 +49,3 @@ metadata from the current date, a citation key, or a nearby publication.
 Verified entries for explicit citation keys may be added. Prose-inferred
 references and corrections to existing entries require explicit user approval.
 Show field-level before and after values for corrections.
-

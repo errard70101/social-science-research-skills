@@ -232,9 +232,7 @@ def test_generate_citation_key_skips_stop_words_and_resolves_collision(
         == "acemoglu2001colonial"
     )
     assert (
-        bibliography_module.generate_citation_key(
-            fields, {"acemoglu2001colonial"}
-        )
+        bibliography_module.generate_citation_key(fields, {"acemoglu2001colonial"})
         == "acemoglu2001colonialorigins"
     )
 
@@ -242,13 +240,26 @@ def test_generate_citation_key_skips_stop_words_and_resolves_collision(
 def test_generate_citation_key_requires_semantic_components(
     bibliography_module,
 ):
-    with pytest.raises(
-        ValueError, match="author, year, and title are required"
-    ):
+    with pytest.raises(ValueError, match="author, year, and title are required"):
         bibliography_module.generate_citation_key(
             {"author": "", "year": "2024", "title": "The Study"},
             set(),
         )
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("cost-benefit analysis", "Cost-Benefit Analysis"),
+        ("long-term effects", "Long-Term Effects"),
+        ("Up-to-Date information", "Up-to-Date Information"),
+        ("self-reporting", "Self-Reporting"),
+    ],
+)
+def test_headline_title_capitalizes_hyphenated_compounds_properly(
+    bibliography_module, raw, expected
+):
+    assert bibliography_module.headline_title(raw) == expected
 
 
 def test_headline_title_preserves_protected_content(bibliography_module):
@@ -266,6 +277,7 @@ def test_headline_title_preserves_protected_content(bibliography_module):
 def test_headline_title_capitalizes_first_last_and_post_colon_words(
     bibliography_module,
 ):
-    assert bibliography_module.headline_title(
-        "war and peace: evidence in and out"
-    ) == "War and Peace: Evidence in and Out"
+    assert (
+        bibliography_module.headline_title("war and peace: evidence in and out")
+        == "War and Peace: Evidence in and Out"
+    )
