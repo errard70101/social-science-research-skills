@@ -4,8 +4,11 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
+import tempfile
 import unicodedata
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -45,6 +48,7 @@ ENTRY_FIELDS = {
     "requires_user_approval",
     "user_approval",
 }
+CORRECTION_FIELDS = ENTRY_FIELDS | {"before_fields"}
 SUPPORTED_ENTRY_TYPES = {
     "article",
     "book",
@@ -813,10 +817,16 @@ def _require_exact_fields(
         )
 
 
-def validate_entry(entry: object, label: str = "entry") -> None:
+def validate_entry(
+    entry: object, label: str = "entry", *, correction: bool = False
+) -> None:
     if not isinstance(entry, dict):
         raise ValueError(f"{label} must be an object")
-    _require_exact_fields(entry, ENTRY_FIELDS, label)
+    _require_exact_fields(
+        entry, CORRECTION_FIELDS if correction else ENTRY_FIELDS, label
+    )
+    if correction and not isinstance(entry["before_fields"], dict):
+        raise ValueError(f"{label} before_fields must be an object")
 
     status = entry["status"]
     if status not in STATUSES:
@@ -871,7 +881,7 @@ def _validate_entry_group(
             raise ValueError(
                 f"{label} must be verified, approved, or rejected as applicable"
             )
-        validate_entry(entry, label)
+        validate_entry(entry, label, correction=field == "existing_entry_corrections")
         if status == "rejected":
             continue
         if approval_required and (
@@ -1024,6 +1034,117 @@ def validate_proposal(proposal: object) -> None:
     )
 
 
+def render_entry(entry: dict[str, Any]) -> str:
+    fields = {str(key): str(value) for key, value in entry["fields"].items()}
+    fields["title"] = headline_title(fields["title"])
+    lines = [f"@{entry['entry_type']}{{{entry['citation_key']},"]
+    names = sorted(fields, key=str.casefold)
+    for index, name in enumerate(names):
+        suffix = "," if index < len(names) - 1 else ""
+        lines.append(f"  {name} = {{{fields[name]}}}{suffix}")
+    lines.append("}")
+    return "\n".join(lines)
+
+
+def atomic_write(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}.", text=True
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _accepted_entries(
+    proposal: dict[str, Any], field: str
+) -> list[dict[str, Any]]:
+    return [
+        entry
+        for entry in proposal[field]
+        if entry["status"] in {"verified", "approved"}
+    ]
+
+
+def apply_proposal(proposal: dict[str, Any]) -> dict[str, object]:
+    validate_proposal(proposal)
+    root = Path(str(proposal["project_root"])).resolve()
+    target, _ = _resolve_project_path(root / str(proposal["target_bib"]), root)
+    text = target.read_text(encoding="utf-8") if target.exists() else ""
+    parsed = parse_bibtex_entries(text)
+    existing_by_key = {str(entry["key"]): entry for entry in parsed}
+
+    corrections = _accepted_entries(proposal, "existing_entry_corrections")
+    for correction in corrections:
+        current = existing_by_key[str(correction["citation_key"])]
+        if correction["before_fields"] != current["fields"]:
+            raise ValueError(
+                f"{correction['citation_key']} before_fields do not match"
+            )
+    for correction in sorted(
+        corrections,
+        key=lambda item: int(existing_by_key[str(item["citation_key"])]["start"]),
+        reverse=True,
+    ):
+        current = existing_by_key[str(correction["citation_key"])]
+        start = int(current["start"])
+        end = int(current["end"])
+        text = text[:start] + render_entry(correction) + text[end + 1 :]
+
+    additions = [
+        *_accepted_entries(proposal, "new_entries"),
+        *_accepted_entries(proposal, "inferred_references"),
+    ]
+    if additions:
+        if text and not text.endswith("\n"):
+            separator = "\n\n"
+        elif text and not text.endswith("\n\n"):
+            separator = "\n"
+        else:
+            separator = ""
+        text += separator + "\n\n".join(render_entry(entry) for entry in additions)
+        text += "\n"
+
+    atomic_write(target, text)
+    applied = [*corrections, *additions]
+    rejected = [
+        entry
+        for field in (
+            "new_entries",
+            "existing_entry_corrections",
+            "inferred_references",
+        )
+        for entry in proposal[field]
+        if entry["status"] == "rejected"
+    ]
+    result: dict[str, object] = {
+        "applied_at": datetime.now(timezone.utc).isoformat(),
+        "applied": [entry["citation_key"] for entry in applied],
+        "applied_entries": [
+            {
+                "citation_key": entry["citation_key"],
+                "sources": entry["sources"],
+                "verifier": entry["verifier"],
+            }
+            for entry in applied
+        ],
+        "skipped": [entry["citation_key"] for entry in rejected],
+        "unresolved": proposal["unresolved"],
+        "verification_report": proposal["verification_report"],
+    }
+    atomic_write(
+        root / "bibliography-apply-result.json",
+        json.dumps(result, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+    )
+    return result
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Scan, validate, and update a LaTeX bibliography."
@@ -1061,7 +1182,8 @@ def main(argv: list[str] | None = None) -> int:
         proposal = json.loads(args.proposal.read_text(encoding="utf-8"))
         validate_proposal(proposal)
     elif args.command == "apply":
-        raise SystemExit("apply is not implemented")
+        proposal = json.loads(args.proposal.read_text(encoding="utf-8"))
+        apply_proposal(proposal)
     return 0
 
 

@@ -315,6 +315,12 @@ def test_validate_requires_approval_for_corrections_and_inferred_references(
             "status": "approved",
             "requires_user_approval": True,
             "user_approval": False,
+            "before_fields": {
+                "author": "A",
+                "title": "T",
+                "journal": "J",
+                "year": "1",
+            },
         }
     )
     proposal["existing_entry_corrections"] = [correction]
@@ -478,6 +484,13 @@ def test_validate_rejects_identifier_collision_from_correction(
             "status": "approved",
             "requires_user_approval": True,
             "user_approval": True,
+            "before_fields": {
+                "author": "B",
+                "title": "U",
+                "journal": "J",
+                "year": "2",
+                "doi": "10.1000/two",
+            },
         }
     )
     correction["fields"]["doi"] = "10.1000/one"
