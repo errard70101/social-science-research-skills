@@ -581,6 +581,19 @@ def format_author_string(authors: list[str]) -> str:
     return f"{surnames[0]} et al."
 
 
+def _build_visual_block(
+    visual: dict[str, Any],
+    paper_citation_key: str,
+    figure_relative_dir: Path | None,
+) -> str:
+    kind = visual.get("kind", "none")
+    if kind == "none":
+        return ""
+    raise NotImplementedError(
+        f"headline_visual.kind = {kind!r} not yet implemented"
+    )
+
+
 def _load_template() -> str:
     here = Path(__file__).resolve().parent
     template_path = (here / TEMPLATE_RELATIVE_PATH).resolve()
@@ -638,7 +651,11 @@ def render(
     )
     for section in CONTENT_REQUIRED_SECTIONS:
         context[section] = _expand_cite_placeholders(context[section])
-    context["headline_visual_block"] = ""
+    context["headline_visual_block"] = _build_visual_block(
+        content["headline_visual"],
+        content["paper"]["citation_key"],
+        figure_relative_dir=None,
+    )
     template = _load_template()
     rendered = _substitute(template, context)
     rendered = _strip_empty_cites(rendered)
