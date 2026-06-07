@@ -14,6 +14,7 @@ KIND_SUFFIXES = {
     "slides": "_Slides",
     "replication": "_Replication",
 }
+NAME_SUFFIXES = {"jr", "sr", "ii", "iii", "iv", "v"}
 
 
 def ascii_token(value: str, *, allow_hyphen: bool = True) -> str:
@@ -35,8 +36,19 @@ def family_name(author: Mapping[str, Any]) -> str:
     if structured:
         return ascii_token(structured)
     display = str(author.get("display_name") or "").strip()
-    tokens = [token for token in re.split(r"[\s,]+", display) if token]
-    return ascii_token(tokens[-1]) if tokens else ""
+    comma_parts = [part.strip() for part in display.split(",") if part.strip()]
+    if len(comma_parts) > 1:
+        if any(_is_name_suffix(part) for part in comma_parts[1:]):
+            return ""
+        return ascii_token(comma_parts[0])
+    tokens = display.split()
+    if not tokens or _is_name_suffix(tokens[-1]):
+        return ""
+    return ascii_token(tokens[-1])
+
+
+def _is_name_suffix(value: str) -> bool:
+    return ascii_token(value, allow_hyphen=False).lower() in NAME_SUFFIXES
 
 
 def format_authors(authors: Sequence[Mapping[str, Any]]) -> str:
@@ -61,11 +73,35 @@ def normalize_doi(value: str) -> str:
     return candidate
 
 
-def truncate_stem(prefix: str, suffix: str, extension: str, max_length: int) -> str:
-    available = max_length - len(suffix) - len(extension)
+def normalize_year(value: Any) -> str:
+    if isinstance(value, bool):
+        raise ValueError("year must be a four-digit integer")
+    if isinstance(value, int):
+        candidate = str(value)
+    elif isinstance(value, str):
+        candidate = value.strip()
+    else:
+        raise ValueError("year must be a four-digit integer")
+    if re.fullmatch(r"[0-9]{4}", candidate) is None or int(candidate) < 1000:
+        raise ValueError("year must be a four-digit integer")
+    return candidate
+
+
+def truncate_stem(
+    title: str,
+    suffix: str,
+    extension: str,
+    max_length: int,
+    *,
+    preserved_prefix: str = "",
+) -> str:
+    available = max_length - len(preserved_prefix) - len(suffix) - len(extension)
     if available < 1:
-        raise ValueError("max_length is too small for the required suffix")
-    return prefix[:available].rstrip("_-") + suffix + extension
+        raise ValueError("max_length leaves no room for a nonempty title")
+    truncated_title = title[:available].rstrip("_-")
+    if not truncated_title:
+        raise ValueError("max_length leaves no room for a nonempty title")
+    return preserved_prefix + truncated_title + suffix + extension
 
 
 def build_filename(
@@ -75,17 +111,24 @@ def build_filename(
     max_length: int = 180,
 ) -> str:
     authors = format_authors(metadata.get("authors", []))
-    year = metadata.get("year")
+    year_value = metadata.get("year")
     title = clean_title(str(metadata.get("title") or ""))
-    if not authors or not year:
+    if not authors or year_value is None or year_value == "":
         raise ValueError("authors and year are required to generate a filename")
+    year = normalize_year(year_value)
     if not title:
         raise ValueError("title is required to generate a filename")
     if kind not in KIND_SUFFIXES:
         raise ValueError(f"unsupported item kind: {kind}")
     extension = "" if kind == "replication" else ".pdf"
-    prefix = f"{authors}_{year}_{title}"
-    return truncate_stem(prefix, KIND_SUFFIXES[kind], extension, max_length)
+    preserved_prefix = f"{authors}_{year}_"
+    return truncate_stem(
+        title,
+        KIND_SUFFIXES[kind],
+        extension,
+        max_length,
+        preserved_prefix=preserved_prefix,
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
