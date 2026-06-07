@@ -39,3 +39,15 @@ def rename_module() -> ModuleType:
 @pytest.fixture(scope="session")
 def install_module() -> ModuleType:
     return load_script("install_skills", REPO_ROOT / "scripts" / "install.py")
+
+
+@pytest.fixture(scope="session")
+def bibliography_module() -> ModuleType:
+    return load_script(
+        "manage_bibliography",
+        REPO_ROOT
+        / "skills"
+        / "manage-latex-bibliography"
+        / "scripts"
+        / "manage_bibliography.py",
+    )
