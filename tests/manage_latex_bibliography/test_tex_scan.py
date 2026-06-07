@@ -70,17 +70,29 @@ def test_discover_tex_files_rejects_missing_source(bibliography_module, tmp_path
         bibliography_module.discover_tex_files(main, tmp_path)
 
 
-def test_discover_tex_files_adds_tex_suffix_to_dotted_names(
-    bibliography_module, tmp_path
-):
+def test_discover_tex_files_preserves_explicit_suffixes(bibliography_module, tmp_path):
     main = tmp_path / "main.tex"
-    chapter = tmp_path / "chapter.v1.tex"
-    main.write_text("\\input{chapter.v1}\n")
+    chapter = tmp_path / "chapter.ltx"
+    main.write_text("\\input{chapter.ltx}\n")
     chapter.write_text("Chapter\n")
 
     assert bibliography_module.discover_tex_files(main, tmp_path) == [
         main.resolve(),
         chapter.resolve(),
+    ]
+
+
+def test_discover_tex_files_follows_multiline_inputs(bibliography_module, tmp_path):
+    sections = tmp_path / "sections"
+    sections.mkdir()
+    main = tmp_path / "main.tex"
+    intro = sections / "intro.tex"
+    main.write_text("\\input{\nsections/intro\n}\n")
+    intro.write_text("Introduction\n")
+
+    assert bibliography_module.discover_tex_files(main, tmp_path) == [
+        main.resolve(),
+        intro.resolve(),
     ]
 
 

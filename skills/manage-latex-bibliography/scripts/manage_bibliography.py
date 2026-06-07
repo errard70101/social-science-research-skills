@@ -44,6 +44,13 @@ def strip_tex_comment(line: str) -> str:
     return line
 
 
+def tex_reference_path(reference: str) -> Path:
+    path = Path(reference.strip())
+    if path.suffix == "":
+        return path.with_suffix(".tex")
+    return path
+
+
 def discover_tex_files(main: Path, root: Path) -> list[Path]:
     resolved_main, resolved_root = _resolve_project_path(main, root)
     discovered: set[Path] = set()
@@ -55,16 +62,14 @@ def discover_tex_files(main: Path, root: Path) -> list[Path]:
             raise FileNotFoundError(source)
         discovered.add(source)
 
-        for line in source.read_text().splitlines():
-            uncommented = strip_tex_comment(line)
-            for match in INPUT_COMMAND_RE.finditer(uncommented):
-                included = Path(match.group(1).strip())
-                if included.suffix != ".tex":
-                    included = Path(f"{included}.tex")
-                candidate, _ = _resolve_project_path(
-                    source.parent / included, resolved_root
-                )
-                visit(candidate)
+        lines = source.read_text(encoding="utf-8").splitlines()
+        uncommented_text = "\n".join(strip_tex_comment(line) for line in lines)
+        for match in INPUT_COMMAND_RE.finditer(uncommented_text):
+            included = tex_reference_path(match.group(1))
+            candidate, _ = _resolve_project_path(
+                source.parent / included, resolved_root
+            )
+            visit(candidate)
 
     visit(resolved_main)
     return [resolved_main, *sorted(discovered - {resolved_main})]
@@ -77,7 +82,8 @@ def scan_citations(source: Path, root: Path) -> list[dict[str, str | int]]:
     relative_source = resolved_source.relative_to(resolved_root).as_posix()
     citations: list[dict[str, str | int]] = []
 
-    for line_number, line in enumerate(resolved_source.read_text().splitlines(), 1):
+    text = resolved_source.read_text(encoding="utf-8")
+    for line_number, line in enumerate(text.splitlines(), 1):
         uncommented = strip_tex_comment(line)
         for match in CITATION_COMMAND_RE.finditer(uncommented):
             for raw_key in match.group(1).split(","):
