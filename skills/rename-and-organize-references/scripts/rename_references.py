@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import shutil
 import sys
 import unicodedata
 import urllib.parse
@@ -588,6 +589,61 @@ def load_mapping(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def ordered_items(data: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    return sorted(
+        data["items"],
+        key=lambda item: (
+            -len(Path(str(item["source"])).parts),
+            str(item["source"]),
+        ),
+    )
+
+
+def write_result(path: Path, result: Mapping[str, Any]) -> None:
+    path.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
+
+
+def apply_mapping(data: Mapping[str, Any], result_path: Path) -> dict[str, Any]:
+    errors = validate_mapping(data)
+    if errors:
+        raise ValueError("; ".join(errors))
+    root = Path(str(data["root"])).expanduser().resolve()
+    result: dict[str, Any] = {
+        "schema_version": 1,
+        "status": "running",
+        "root": str(root),
+        "completed": [],
+        "error": None,
+    }
+    write_result(result_path, result)
+    try:
+        for item in ordered_items(data):
+            source = root / str(item["source"])
+            destination = root / str(item["destination"])
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(source), str(destination))
+            result["completed"].append(
+                {
+                    "source": item["source"],
+                    "destination": item["destination"],
+                    "kind": item.get("kind"),
+                    "reverse": {
+                        "source": item["destination"],
+                        "destination": item["source"],
+                    },
+                }
+            )
+            write_result(result_path, result)
+    except Exception as error:
+        result["status"] = "failed"
+        result["error"] = str(error)
+        write_result(result_path, result)
+        raise
+    result["status"] = "completed"
+    write_result(result_path, result)
+    return result
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Propose, validate, and apply academic reference renames."
@@ -603,6 +659,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     validate_parser = subparsers.add_parser("validate")
     validate_parser.add_argument("--mapping", required=True, type=Path)
+    apply_parser = subparsers.add_parser("apply")
+    apply_parser.add_argument("--mapping", required=True, type=Path)
+    apply_parser.add_argument("--result", type=Path)
     return parser
 
 
@@ -623,6 +682,16 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"ERROR: {error}", file=sys.stderr)
             return 1
         print("Mapping is valid.")
+    if args.command == "apply":
+        result_path = args.result or args.mapping.with_name(
+            f"{args.mapping.stem}-result.json"
+        )
+        try:
+            apply_mapping(load_mapping(args.mapping), result_path)
+        except (ValueError, OSError) as error:
+            print(f"ERROR: {error}", file=sys.stderr)
+            return 1
+        print(f"Result written to {result_path}")
     return 0
 
 
