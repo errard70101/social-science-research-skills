@@ -2,10 +2,18 @@
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import unicodedata
+import urllib.parse
+import urllib.request
 from collections.abc import Mapping, Sequence
-from typing import Any
+from datetime import datetime, timezone
+from difflib import SequenceMatcher
+from pathlib import Path
+from typing import Any, Protocol
+
+from pypdf import PdfReader
 
 DOI_PATTERN = re.compile(r"10\.\d{4,9}/[-._;()/:A-Z0-9]+", re.IGNORECASE)
 KIND_SUFFIXES = {
@@ -15,6 +23,53 @@ KIND_SUFFIXES = {
     "replication": "_Replication",
 }
 NAME_SUFFIXES = {"jr", "sr", "ii", "iii", "iv", "v"}
+
+
+class MetadataProvider(Protocol):
+    def lookup_doi(self, doi: str) -> dict[str, Any] | None: ...
+
+    def search_title(self, title: str) -> dict[str, Any] | None: ...
+
+
+class OpenAlexProvider:
+    base_url = "https://api.openalex.org/works"
+
+    def _request(self, url: str) -> dict[str, Any]:
+        request = urllib.request.Request(
+            url,
+            headers={"User-Agent": "social-science-research-skills/0.1"},
+        )
+        with urllib.request.urlopen(request, timeout=15) as response:
+            return json.loads(response.read().decode("utf-8"))
+
+    def _metadata(self, work: Mapping[str, Any]) -> dict[str, Any]:
+        authors = []
+        for authorship in work.get("authorships", []):
+            author = authorship.get("author", {})
+            authors.append(
+                {
+                    "display_name": author.get("display_name", ""),
+                    "family_name": author.get("family_name", ""),
+                }
+            )
+        return {
+            "title": work.get("title"),
+            "year": work.get("publication_year"),
+            "authors": authors,
+            "doi": normalize_doi(str(work.get("doi") or "")),
+            "source": "openalex",
+        }
+
+    def lookup_doi(self, doi: str) -> dict[str, Any] | None:
+        encoded = urllib.parse.quote(doi, safe="")
+        return self._metadata(
+            self._request(f"{self.base_url}/https://doi.org/{encoded}")
+        )
+
+    def search_title(self, title: str) -> dict[str, Any] | None:
+        query = urllib.parse.urlencode({"search": title, "per-page": 1})
+        results = self._request(f"{self.base_url}?{query}").get("results", [])
+        return self._metadata(results[0]) if results else None
 
 
 def ascii_token(value: str, *, allow_hyphen: bool = True) -> str:
@@ -134,16 +189,185 @@ def build_filename(
     )
 
 
+def read_pdf_candidate(path: Path) -> dict[str, Any]:
+    reader = PdfReader(path)
+    text = "\n".join(
+        page.extract_text() or "" for page in reader.pages[: min(3, len(reader.pages))]
+    )
+    doi_match = DOI_PATTERN.search(text)
+    metadata = reader.metadata
+    return {
+        "doi": normalize_doi(doi_match.group(0)) if doi_match else "",
+        "title": str(getattr(metadata, "title", "") or ""),
+        "author": str(getattr(metadata, "author", "") or ""),
+    }
+
+
+def accept_title_match(
+    query: str, candidate: Mapping[str, Any], *, threshold: float = 0.9
+) -> bool:
+    candidate_title = str(candidate.get("title") or "")
+    ratio = SequenceMatcher(None, query.casefold(), candidate_title.casefold()).ratio()
+    return ratio >= threshold
+
+
+def classify_related(path: Path) -> str | None:
+    name = path.stem.casefold() if path.is_file() else path.name.casefold()
+    if "appendix" in name:
+        return "appendix"
+    if "slide" in name or "presentation" in name:
+        return "slides"
+    if path.is_dir() and ("replication" in name or name.endswith("_code")):
+        return "replication"
+    return None
+
+
+def related_to(main: Path, candidate: Path) -> bool:
+    main_stem = main.stem.casefold()
+    candidate_stem = (
+        candidate.stem.casefold() if candidate.is_file() else candidate.name.casefold()
+    )
+    return candidate_stem.startswith(main_stem)
+
+
+def _has_required_metadata(metadata: Mapping[str, Any]) -> bool:
+    try:
+        build_filename(metadata, kind="main-paper")
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+def resolve_metadata(
+    path: Path,
+    *,
+    provider: MetadataProvider | None,
+    threshold: float = 0.9,
+) -> dict[str, Any] | None:
+    try:
+        local = read_pdf_candidate(path)
+    except Exception:
+        local = {}
+    if _has_required_metadata(local):
+        return dict(local)
+    if provider and local.get("doi"):
+        try:
+            metadata = provider.lookup_doi(str(local["doi"]))
+        except Exception:
+            metadata = None
+        if metadata:
+            return metadata
+    query = str(local.get("title") or path.stem.replace("_", " "))
+    if provider and query:
+        try:
+            candidate = provider.search_title(query)
+        except Exception:
+            candidate = None
+        if candidate and accept_title_match(query, candidate, threshold=threshold):
+            return candidate
+    return None
+
+
+def propose(
+    directory: Path,
+    output: Path,
+    *,
+    provider: MetadataProvider | None,
+) -> dict[str, Any]:
+    root = directory.resolve()
+    output_path = output.resolve()
+    items = []
+    unresolved = []
+    entries = sorted(root.iterdir())
+    main_papers = [
+        path
+        for path in entries
+        if path.resolve() != output_path
+        and path.is_file()
+        and path.suffix.casefold() == ".pdf"
+        and classify_related(path) is None
+    ]
+    claimed: set[Path] = set()
+    for path in main_papers:
+        claimed.add(path)
+        metadata = resolve_metadata(path, provider=provider)
+        if not metadata:
+            unresolved.append(
+                {
+                    "source": path.name,
+                    "reason": "required metadata could not be resolved",
+                }
+            )
+            continue
+        try:
+            destination = build_filename(metadata, kind="main-paper")
+        except ValueError as error:
+            unresolved.append({"source": path.name, "reason": str(error)})
+            continue
+        confidence = "high" if metadata.get("doi") else "review"
+        items.append(
+            {
+                "source": path.name,
+                "destination": destination,
+                "kind": "main-paper",
+                "confidence": confidence,
+                "metadata": metadata,
+            }
+        )
+        for candidate in entries:
+            kind = classify_related(candidate)
+            if candidate in claimed or kind is None or not related_to(path, candidate):
+                continue
+            items.append(
+                {
+                    "source": candidate.name,
+                    "destination": build_filename(metadata, kind=kind),
+                    "kind": kind,
+                    "confidence": confidence,
+                    "metadata": metadata,
+                }
+            )
+            claimed.add(candidate)
+    for path in entries:
+        if path in claimed or path.resolve() == output_path:
+            continue
+        is_pdf = path.is_file() and path.suffix.casefold() == ".pdf"
+        if is_pdf or classify_related(path):
+            unresolved.append(
+                {"source": path.name, "reason": "related material could not be grouped"}
+            )
+    mapping = {
+        "schema_version": 1,
+        "root": str(root),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "items": items,
+        "unresolved": unresolved,
+    }
+    output.write_text(json.dumps(mapping, indent=2) + "\n", encoding="utf-8")
+    return mapping
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Propose, validate, and apply academic reference renames."
     )
-    parser.add_subparsers(dest="command", required=True)
+    subparsers = parser.add_subparsers(dest="command", required=True)
+    propose_parser = subparsers.add_parser("propose")
+    propose_parser.add_argument("--directory", required=True, type=Path)
+    propose_parser.add_argument("--output", required=True, type=Path)
+    propose_parser.add_argument(
+        "--offline",
+        action="store_true",
+        help="Disable OpenAlex metadata lookups.",
+    )
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
-    build_parser().parse_args(argv)
+    args = build_parser().parse_args(argv)
+    if args.command == "propose":
+        provider = None if args.offline else OpenAlexProvider()
+        propose(args.directory, args.output, provider=provider)
     return 0
 
 
