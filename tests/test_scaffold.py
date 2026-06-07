@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import sys
 
 import pytest
@@ -59,5 +60,22 @@ def test_main_accepts_help(module_fixture, request):
 
     with pytest.raises(SystemExit) as exc_info:
         module.main(["--help"])
+
+    assert exc_info.value.code == 0
+
+
+def test_summary_cli_parser_loads(summary_module):
+    parser = summary_module.build_parser()
+    subparsers_action = next(
+        action
+        for action in parser._actions
+        if isinstance(action, argparse._SubParsersAction)
+    )
+    assert set(subparsers_action.choices) == {"fetch", "extract", "render"}
+
+
+def test_summary_main_accepts_help(summary_module):
+    with pytest.raises(SystemExit) as exc_info:
+        summary_module.main(["--help"])
 
     assert exc_info.value.code == 0

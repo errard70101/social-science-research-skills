@@ -39,3 +39,15 @@ def rename_module() -> ModuleType:
 @pytest.fixture(scope="session")
 def install_module() -> ModuleType:
     return load_script("install_skills", REPO_ROOT / "scripts" / "install.py")
+
+
+@pytest.fixture(scope="session")
+def summary_module() -> ModuleType:
+    return load_script(
+        "summarize_paper",
+        REPO_ROOT
+        / "skills"
+        / "summarize-academic-paper"
+        / "scripts"
+        / "summarize_paper.py",
+    )
