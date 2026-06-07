@@ -126,6 +126,46 @@ def test_html_landing_page_uses_citation_pdf_url_meta(
     ]
 
 
+def test_citation_pdf_url_meta_handles_flipped_attribute_order(
+    summary_module, tmp_path: Path
+):
+    landing = (
+        "<html><head>"
+        "<meta content=\"https://journal.example/article.pdf\" "
+        "name=\"citation_pdf_url\">"
+        "</head><body></body></html>"
+    )
+    pdf_bytes = b"%PDF-1.4 journal stub"
+    client = FakeClient(
+        {
+            "https://journal.example/article": FakeResponse(
+                status_code=200,
+                headers={"content-type": "text/html"},
+                content=landing.encode("utf-8"),
+                url="https://journal.example/article",
+            ),
+            "https://journal.example/article.pdf": FakeResponse(
+                status_code=200,
+                headers={"content-type": "application/pdf"},
+                content=pdf_bytes,
+                url="https://journal.example/article.pdf",
+            ),
+        }
+    )
+
+    result = summary_module.resolve_input(
+        "https://journal.example/article",
+        output_dir=tmp_path,
+        http_client_factory=lambda: client,
+    )
+
+    assert result["resolution_path"] == ["url", "citation-pdf-meta"]
+    assert client.calls == [
+        "https://journal.example/article",
+        "https://journal.example/article.pdf",
+    ]
+
+
 def test_non_pdf_response_is_unresolved(summary_module, tmp_path: Path):
     client = FakeClient(
         {

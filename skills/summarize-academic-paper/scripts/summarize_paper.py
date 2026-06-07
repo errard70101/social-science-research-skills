@@ -21,8 +21,8 @@ NBER_PAPER_PATTERN = re.compile(
     r"^https?://(?:www\.)?nber\.org/papers/(?P<id>w?\d+)/?$"
 )
 CITATION_PDF_META = re.compile(
-    r"<meta\s+[^>]*name=[\"']citation_pdf_url[\"']\s+"
-    r"[^>]*content=[\"'](?P<url>[^\"']+)[\"']",
+    r"<meta\b(?=[^>]*\bname=[\"']citation_pdf_url[\"'])"
+    r"[^>]*\bcontent=[\"'](?P<url>[^\"']+)[\"']",
     re.IGNORECASE,
 )
 
