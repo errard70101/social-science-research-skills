@@ -477,6 +477,77 @@ def extract(
     return artifact
 
 
+CONTENT_REQUIRED_SECTIONS = (
+    "one_sentence",
+    "setup",
+    "empirical_strategy",
+    "identification_cartoon",
+    "key_result",
+    "placement_in_literature",
+    "limitations",
+    "followups",
+)
+PAPER_REQUIRED_FIELDS = (
+    "authors",
+    "year",
+    "title",
+    "venue",
+    "citation_key",
+)
+VALID_VISUAL_KINDS = {"none", "image", "table"}
+
+
+def validate_content(content: dict[str, Any]) -> None:
+    if content.get("schema_version") != 1:
+        raise ValueError("content schema_version must be 1")
+    paper = content.get("paper")
+    if not isinstance(paper, dict):
+        raise ValueError("content.paper must be an object")
+    missing_paper_fields = [
+        field
+        for field in PAPER_REQUIRED_FIELDS
+        if not paper.get(field) and paper.get(field) != 0
+    ]
+    if missing_paper_fields:
+        raise ValueError(
+            f"content.paper missing fields: {missing_paper_fields}"
+        )
+    if not isinstance(paper["authors"], list) or not paper["authors"]:
+        raise ValueError("content.paper.authors must be a non-empty list")
+    for section in CONTENT_REQUIRED_SECTIONS:
+        value = content.get(section)
+        if not isinstance(value, str):
+            raise ValueError(f"content.{section} must be a string")
+        if not value.strip():
+            raise ValueError(f"content.{section} must not be empty")
+    visual = content.get("headline_visual")
+    if not isinstance(visual, dict):
+        raise ValueError("content.headline_visual must be an object")
+    kind = visual.get("kind")
+    if kind not in VALID_VISUAL_KINDS:
+        raise ValueError(
+            f"content.headline_visual.kind must be one of {VALID_VISUAL_KINDS}"
+        )
+    if kind == "image":
+        for field in ("label", "page"):
+            if not visual.get(field):
+                raise ValueError(
+                    f"content.headline_visual.{field} required for image mode"
+                )
+    if kind == "table" and not visual.get("latex_table"):
+        raise ValueError(
+            "content.headline_visual.latex_table required for table mode"
+        )
+    predecessors = content.get("predecessor_citations", [])
+    if not isinstance(predecessors, list):
+        raise ValueError("content.predecessor_citations must be a list")
+    for entry in predecessors:
+        if not isinstance(entry, dict) or not entry.get("key"):
+            raise ValueError(
+                "each predecessor_citations entry must have a non-empty key"
+            )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
