@@ -23,18 +23,18 @@ def accepted_entry(key="missing", entry_type="article"):
         "title": "A Verified Article",
         "journal": "Journal of Tests",
         "year": "2026",
+        "doi": "10.1000/example",
     }
     return {
-        "key": key,
-        "type": entry_type,
+        "citation_key": key,
+        "entry_type": entry_type,
         "fields": fields,
-        "identifiers": {"doi": "10.1000/example"},
         "sources": [{"url": "https://example.test/article", "retrieved": "2026-06-08"}],
         "conflicts": [],
         "status": "verified",
         "verifier": "independent-agent",
         "requires_user_approval": False,
-        "approved": False,
+        "user_approval": False,
     }
 
 
@@ -109,16 +109,15 @@ def test_build_scan_proposal_tracks_known_and_missing_citations(
     ]
     assert proposal["new_entries"] == [
         {
-            "key": "missing",
-            "type": "",
+            "citation_key": "missing",
+            "entry_type": "",
             "fields": {},
-            "identifiers": {},
             "sources": [],
             "conflicts": [],
             "status": "candidate",
             "verifier": None,
             "requires_user_approval": False,
-            "approved": False,
+            "user_approval": False,
         }
     ]
     assert proposal["file_digests"] == {
@@ -150,10 +149,11 @@ def test_scan_without_bibtex_config_proposes_references_and_aea(
         {
             "file": "main.tex",
             "status": "verified",
-            "before": "\\end{document}",
-            "after": (
-                "\\bibliographystyle{aea}\n\\bibliography{references}\n\\end{document}"
-            ),
+            "action": "insert-before-end-document",
+            "commands": [
+                "\\bibliographystyle{aea}",
+                "\\bibliography{references}",
+            ],
         }
     ]
 
@@ -169,6 +169,27 @@ def test_scan_preserves_non_aea_style_and_warns(bibliography_module, tmp_path):
     proposal = bibliography_module.build_scan_proposal(project)
 
     assert proposal["tex_changes"] == []
+    assert proposal["warnings"] == ["existing bibliography style preserved: plain"]
+
+
+def test_scan_with_style_but_no_target_adds_only_bibliography_command(
+    bibliography_module, tmp_path
+):
+    project, _ = write_project(
+        tmp_path,
+        "\\documentclass{article}\n\\bibliographystyle{plain}\n\\end{document}\n",
+    )
+
+    proposal = bibliography_module.build_scan_proposal(project)
+
+    assert proposal["tex_changes"] == [
+        {
+            "file": "main.tex",
+            "status": "verified",
+            "action": "insert-before-end-document",
+            "commands": ["\\bibliography{references}"],
+        }
+    ]
     assert proposal["warnings"] == ["existing bibliography style preserved: plain"]
 
 
@@ -293,7 +314,7 @@ def test_validate_requires_approval_for_corrections_and_inferred_references(
         {
             "status": "approved",
             "requires_user_approval": True,
-            "approved": False,
+            "user_approval": False,
         }
     )
     proposal["existing_entry_corrections"] = [correction]
@@ -301,14 +322,14 @@ def test_validate_requires_approval_for_corrections_and_inferred_references(
     with pytest.raises(ValueError, match="requires user approval"):
         bibliography_module.validate_proposal(proposal)
 
-    correction["approved"] = True
+    correction["user_approval"] = True
     inferred = accepted_entry("inferred")
-    inferred["identifiers"] = {"doi": "10.1000/inferred"}
+    inferred["fields"]["doi"] = "10.1000/inferred"
     inferred.update(
         {
             "status": "verified",
             "requires_user_approval": False,
-            "approved": False,
+            "user_approval": False,
         }
     )
     proposal["inferred_references"] = [inferred]
@@ -319,7 +340,7 @@ def test_validate_requires_approval_for_corrections_and_inferred_references(
         {
             "status": "approved",
             "requires_user_approval": True,
-            "approved": True,
+            "user_approval": True,
         }
     )
     bibliography_module.validate_proposal(proposal)
@@ -349,8 +370,11 @@ def test_validate_requires_approval_for_corrections_and_inferred_references(
             "techreport",
             {"author": "A", "title": "T", "institution": "I", "year": "1"},
         ),
-        ("unpublished", {"author": "A", "title": "T", "note": "N"}),
-        ("misc", {}),
+        (
+            "unpublished",
+            {"author": "A", "title": "T", "year": "1", "note": "N"},
+        ),
+        ("misc", {"title": "T", "year": "1"}),
     ],
 )
 def test_validate_entry_required_fields(bibliography_module, entry_type, fields):
@@ -390,6 +414,20 @@ def test_validate_rejects_target_created_after_scan(bibliography_module, tmp_pat
         bibliography_module.validate_proposal(proposal)
 
 
+def test_validate_rejects_removed_tracked_digest(bibliography_module, tmp_path):
+    project = tmp_path / "paper"
+    project.mkdir()
+    main = project / "main.tex"
+    chapter = project / "chapter.tex"
+    main.write_text("\\documentclass{article}\n\\input{chapter}\n", encoding="utf-8")
+    chapter.write_text("Chapter\n", encoding="utf-8")
+    proposal = bibliography_module.build_scan_proposal(project)
+    del proposal["file_digests"]["chapter.tex"]
+
+    with pytest.raises(ValueError, match="digest coverage"):
+        bibliography_module.validate_proposal(proposal)
+
+
 @pytest.mark.parametrize("duplicate_kind", ["key", "doi", "isbn"])
 def test_validate_rejects_duplicates_across_existing_and_proposed(
     bibliography_module, tmp_path, duplicate_kind
@@ -413,7 +451,7 @@ def test_validate_rejects_duplicates_across_existing_and_proposed(
     )
     proposal = bibliography_module.build_scan_proposal(project)
     entry = accepted_entry(proposed_key)
-    entry["identifiers"] = proposed_identifiers
+    entry["fields"].update(proposed_identifiers)
     proposal["new_entries"] = [entry]
 
     with pytest.raises(ValueError, match="duplicate"):
@@ -439,13 +477,30 @@ def test_validate_rejects_identifier_collision_from_correction(
         {
             "status": "approved",
             "requires_user_approval": True,
-            "approved": True,
+            "user_approval": True,
         }
     )
-    correction["identifiers"] = {"doi": "10.1000/one"}
+    correction["fields"]["doi"] = "10.1000/one"
     proposal["existing_entry_corrections"] = [correction]
 
     with pytest.raises(ValueError, match="duplicate DOI"):
+        bibliography_module.validate_proposal(proposal)
+
+
+def test_validate_rejects_duplicate_keys_already_in_target(
+    bibliography_module, tmp_path
+):
+    project, _ = write_project(
+        tmp_path,
+        "\\documentclass{article}\n\\bibliography{references}\n",
+        (
+            "@article{same, author={A}, title={T}, journal={J}, year={1}}\n"
+            "@book{same, author={B}, title={U}, publisher={P}, year={2}}\n"
+        ),
+    )
+    proposal = bibliography_module.build_scan_proposal(project)
+
+    with pytest.raises(ValueError, match="duplicate citation keys.*same"):
         bibliography_module.validate_proposal(proposal)
 
 

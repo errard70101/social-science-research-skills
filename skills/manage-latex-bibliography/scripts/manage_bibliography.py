@@ -34,16 +34,15 @@ PROPOSAL_FIELDS = {
     "file_digests",
 }
 ENTRY_FIELDS = {
-    "key",
-    "type",
+    "citation_key",
+    "entry_type",
     "fields",
-    "identifiers",
     "sources",
     "conflicts",
     "status",
     "verifier",
     "requires_user_approval",
-    "approved",
+    "user_approval",
 }
 SUPPORTED_ENTRY_TYPES = {
     "article",
@@ -65,8 +64,8 @@ REQUIRED_ENTRY_FIELDS = {
     "inproceedings": ({"author", "title", "booktitle", "year"},),
     "phdthesis": ({"author", "title", "school", "year"},),
     "techreport": ({"author", "title", "institution", "year"},),
-    "unpublished": ({"author", "title", "note"},),
-    "misc": (set(),),
+    "unpublished": ({"author", "title", "year", "note"},),
+    "misc": ({"title", "year"},),
 }
 
 INPUT_COMMAND_RE = re.compile(r"\\(?:input|include)\s*\{([^{}]+)\}")
@@ -569,16 +568,15 @@ def find_duplicate_identifiers(entries: list[dict[str, object]]) -> list[str]:
 
 def _empty_entry(key: str) -> dict[str, object]:
     return {
-        "key": key,
-        "type": "",
+        "citation_key": key,
+        "entry_type": "",
         "fields": {},
-        "identifiers": {},
         "sources": [],
         "conflicts": [],
         "status": "candidate",
         "verifier": None,
         "requires_user_approval": False,
-        "approved": False,
+        "user_approval": False,
     }
 
 
@@ -632,21 +630,16 @@ def build_scan_proposal(project: Path) -> dict[str, object]:
         key=str.casefold,
     )
 
-    if (
-        bibliography["system"] == "bibtex"
-        and not bibliography["targets"]
-        and not bibliography["styles"]
-    ):
+    if bibliography["system"] == "bibtex" and not bibliography["targets"]:
+        commands = ["\\bibliography{references}"]
+        if not bibliography["styles"]:
+            commands.insert(0, "\\bibliographystyle{aea}")
         tex_changes.append(
             {
                 "file": main.relative_to(root).as_posix(),
                 "status": "verified",
-                "before": "\\end{document}",
-                "after": (
-                    "\\bibliographystyle{aea}\n"
-                    "\\bibliography{references}\n"
-                    "\\end{document}"
-                ),
+                "action": "insert-before-end-document",
+                "commands": commands,
             }
         )
 
@@ -696,17 +689,15 @@ def validate_entry(entry: object, label: str = "entry") -> None:
     status = entry["status"]
     if status not in STATUSES:
         raise ValueError(f"{label} has unknown status: {status}")
-    if not isinstance(entry["key"], str) or not entry["key"].strip():
+    if not isinstance(entry["citation_key"], str) or not entry["citation_key"].strip():
         raise ValueError(f"{label} requires a citation key")
     fields = entry["fields"]
     if not isinstance(fields, dict):
         raise ValueError(f"{label} fields must be an object")
-    if not isinstance(entry["identifiers"], dict):
-        raise ValueError(f"{label} identifiers must be an object")
     if status == "rejected":
         return
 
-    entry_type = entry["type"]
+    entry_type = entry["entry_type"]
     if entry_type not in SUPPORTED_ENTRY_TYPES:
         raise ValueError(f"{label} has unsupported entry type: {entry_type}")
 
@@ -722,7 +713,7 @@ def validate_entry(entry: object, label: str = "entry") -> None:
             raise ValueError(f"{label} requires a verifier")
         if not isinstance(entry["sources"], list) or not entry["sources"]:
             raise ValueError(f"{label} requires sources")
-    if entry["requires_user_approval"] and not entry["approved"]:
+    if entry["requires_user_approval"] and not entry["user_approval"]:
         raise ValueError(f"{label} requires user approval")
 
 
@@ -754,7 +745,7 @@ def _validate_entry_group(
         if approval_required and (
             status != "approved"
             or entry.get("requires_user_approval") is not True
-            or entry.get("approved") is not True
+            or entry.get("user_approval") is not True
         ):
             kind = "inferred reference" if field == "inferred_references" else label
             raise ValueError(f"{kind} requires user approval")
@@ -763,14 +754,10 @@ def _validate_entry_group(
 
 
 def _entry_for_duplicate_check(entry: dict[str, Any]) -> dict[str, object]:
-    fields = dict(entry["fields"])
-    identifiers = entry["identifiers"]
-    if not isinstance(identifiers, dict):
-        raise ValueError("entry identifiers must be an object")
-    for name in ("doi", "isbn"):
-        if identifiers.get(name):
-            fields[name] = identifiers[name]
-    return {"key": entry["key"], "fields": fields}
+    return {
+        "key": entry["citation_key"],
+        "fields": dict(entry["fields"]),
+    }
 
 
 def _validate_duplicates(
@@ -778,7 +765,7 @@ def _validate_duplicates(
     additions: list[dict[str, Any]],
 ) -> None:
     existing_keys = {str(entry["key"]) for entry in existing}
-    addition_keys = [str(entry["key"]) for entry in additions]
+    addition_keys = [str(entry["citation_key"]) for entry in additions]
     duplicate_keys = sorted(
         existing_keys & set(addition_keys)
         | {key for key in addition_keys if addition_keys.count(key) > 1},
@@ -814,13 +801,29 @@ def validate_proposal(proposal: object) -> None:
     file_digests = proposal["file_digests"]
     if not isinstance(file_digests, dict):
         raise ValueError("file_digests must be an object")
+    sources = discover_tex_files(main, root)
+    detected_bibliography = detect_bibliography(sources, root)
+    detected_target, _, _ = _select_target(detected_bibliography)
+    if proposal["bibliography_system"] != detected_bibliography["system"]:
+        raise ValueError("bibliography system no longer matches scanned sources")
+    if proposal["target_bib"] != detected_target:
+        raise ValueError("bibliography target no longer matches scanned sources")
+
+    expected_paths = {path.relative_to(root).as_posix() for path in sources}
+    target_relative = target.relative_to(root).as_posix()
+    if target.is_file():
+        expected_paths.add(target_relative)
+        if target_relative not in file_digests:
+            raise ValueError(f"stale bibliography target: {target_relative}")
+    if set(file_digests) != expected_paths:
+        raise ValueError(
+            "file digest coverage mismatch; "
+            f"expected={sorted(expected_paths)}, actual={sorted(file_digests)}"
+        )
     for relative_path, expected_digest in file_digests.items():
         path, _ = _resolve_project_path(root / str(relative_path), root)
         if not path.is_file() or sha256_file(path) != expected_digest:
             raise ValueError(f"stale file digest: {relative_path}")
-    target_relative = target.relative_to(root).as_posix()
-    if target_relative not in file_digests and target.exists():
-        raise ValueError(f"stale bibliography target: {target_relative}")
 
     for field in (
         "citations",
@@ -860,8 +863,18 @@ def validate_proposal(proposal: object) -> None:
     existing_entries: list[dict[str, object]] = []
     if target.is_file():
         existing_entries = parse_bibtex_entries(target.read_text(encoding="utf-8"))
+    existing_keys = [str(entry["key"]) for entry in existing_entries]
+    duplicate_existing_keys = sorted(
+        {key for key in existing_keys if existing_keys.count(key) > 1},
+        key=str.casefold,
+    )
+    if duplicate_existing_keys:
+        raise ValueError(
+            "duplicate citation keys in existing bibliography: "
+            + ", ".join(duplicate_existing_keys)
+        )
     existing_by_key = {str(entry["key"]): entry for entry in existing_entries}
-    correction_keys = [str(entry["key"]) for entry in corrections]
+    correction_keys = [str(entry["citation_key"]) for entry in corrections]
     missing_correction_keys = sorted(set(correction_keys) - set(existing_by_key))
     if missing_correction_keys:
         raise ValueError(
@@ -871,7 +884,9 @@ def validate_proposal(proposal: object) -> None:
     if len(correction_keys) != len(set(correction_keys)):
         raise ValueError("duplicate correction citation keys")
     for correction in corrections:
-        existing_by_key[str(correction["key"])] = _entry_for_duplicate_check(correction)
+        existing_by_key[str(correction["citation_key"])] = _entry_for_duplicate_check(
+            correction
+        )
     _validate_duplicates(
         list(existing_by_key.values()), [*new_entries, *inferred_entries]
     )
