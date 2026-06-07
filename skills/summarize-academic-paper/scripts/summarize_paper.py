@@ -37,7 +37,17 @@ CAPTION_PATTERN = re.compile(
     re.IGNORECASE,
 )
 SLOT_PATTERN = re.compile(r"<<\s*([^<>\s][^<>]*?)\s*>>")
+CITE_PLACEHOLDER = re.compile(r"\{\{\s*([A-Za-z][\w:-]*)\s*\}\}")
+EMPTY_CITE_PATTERN = re.compile(r"\\cite[a-z]*\*?\{\s*\}")
 TEMPLATE_RELATIVE_PATH = Path("..") / "references" / "template.tex"
+
+
+def _expand_cite_placeholders(text: str) -> str:
+    return CITE_PLACEHOLDER.sub(lambda m: f"\\citep{{{m.group(1)}}}", text)
+
+
+def _strip_empty_cites(text: str) -> str:
+    return EMPTY_CITE_PATTERN.sub("", text)
 
 
 def _utc_now_iso() -> str:
@@ -626,9 +636,12 @@ def render(
     context["paper"]["author_string"] = format_author_string(
         content["paper"]["authors"]
     )
+    for section in CONTENT_REQUIRED_SECTIONS:
+        context[section] = _expand_cite_placeholders(context[section])
     context["headline_visual_block"] = ""
     template = _load_template()
     rendered = _substitute(template, context)
+    rendered = _strip_empty_cites(rendered)
     _atomic_write_text(output_tex, rendered)
     return {
         "schema_version": 1,
