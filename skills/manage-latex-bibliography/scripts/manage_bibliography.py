@@ -56,10 +56,7 @@ SUPPORTED_ENTRY_TYPES = {
 }
 REQUIRED_ENTRY_FIELDS = {
     "article": ({"author", "title", "journal", "year"},),
-    "book": (
-        {"author", "title", "publisher", "year"},
-        {"editor", "title", "publisher", "year"},
-    ),
+    "book": ({"title", "publisher", "year"},),
     "incollection": ({"author", "title", "booktitle", "publisher", "year"},),
     "inproceedings": ({"author", "title", "booktitle", "year"},),
     "phdthesis": ({"author", "title", "school", "year"},),
@@ -569,14 +566,14 @@ def find_duplicate_identifiers(entries: list[dict[str, object]]) -> list[str]:
 def _empty_entry(key: str) -> dict[str, object]:
     return {
         "citation_key": key,
-        "entry_type": "",
+        "entry_type": None,
         "fields": {},
         "sources": [],
         "conflicts": [],
         "status": "candidate",
         "verifier": None,
         "requires_user_approval": False,
-        "user_approval": False,
+        "user_approval": None,
     }
 
 

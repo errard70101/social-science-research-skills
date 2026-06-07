@@ -110,14 +110,14 @@ def test_build_scan_proposal_tracks_known_and_missing_citations(
     assert proposal["new_entries"] == [
         {
             "citation_key": "missing",
-            "entry_type": "",
+            "entry_type": None,
             "fields": {},
             "sources": [],
             "conflicts": [],
             "status": "candidate",
             "verifier": None,
             "requires_user_approval": False,
-            "user_approval": False,
+            "user_approval": None,
         }
     ]
     assert proposal["file_digests"] == {
@@ -350,7 +350,7 @@ def test_validate_requires_approval_for_corrections_and_inferred_references(
     ("entry_type", "fields"),
     [
         ("article", {"author": "A", "title": "T", "journal": "J", "year": "1"}),
-        ("book", {"editor": "E", "title": "T", "publisher": "P", "year": "1"}),
+        ("book", {"title": "T", "publisher": "P", "year": "1"}),
         (
             "incollection",
             {
