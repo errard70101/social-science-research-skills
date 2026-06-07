@@ -83,3 +83,36 @@ def test_propose_groups_appendix_and_replication_materials(
     assert "Lee_2024_Trade_and_Credit.pdf" in destinations
     assert "Lee_2024_Trade_and_Credit_Appendix.pdf" in destinations
     assert "Lee_2024_Trade_and_Credit_Replication" in destinations
+
+
+def test_propose_groups_related_material_with_longest_matching_main_stem(
+    rename_module, tmp_path, monkeypatch
+):
+    (tmp_path / "study.pdf").write_bytes(b"paper")
+    (tmp_path / "study_v2.pdf").write_bytes(b"revised")
+    (tmp_path / "study_v2_appendix.pdf").write_bytes(b"appendix")
+    metadata = {
+        "study.pdf": {
+            "title": "Original Study",
+            "year": 2023,
+            "authors": [{"family_name": "Lee"}],
+        },
+        "study_v2.pdf": {
+            "title": "Revised Study",
+            "year": 2024,
+            "authors": [{"family_name": "Kim"}],
+        },
+    }
+    monkeypatch.setattr(
+        rename_module, "read_pdf_candidate", lambda path: metadata[path.name]
+    )
+
+    mapping = rename_module.propose(
+        tmp_path, tmp_path / "proposal.json", provider=None
+    )
+
+    destinations = {item["source"]: item["destination"] for item in mapping["items"]}
+    assert (
+        destinations["study_v2_appendix.pdf"]
+        == "Kim_2024_Revised_Study_Appendix.pdf"
+    )

@@ -227,7 +227,11 @@ def related_to(main: Path, candidate: Path) -> bool:
     candidate_stem = (
         candidate.stem.casefold() if candidate.is_file() else candidate.name.casefold()
     )
-    return candidate_stem.startswith(main_stem)
+    if candidate_stem == main_stem:
+        return True
+    if not candidate_stem.startswith(main_stem):
+        return False
+    return candidate_stem[len(main_stem)] in {"_", "-", ".", " "}
 
 
 def _has_required_metadata(metadata: Mapping[str, Any]) -> bool:
@@ -287,6 +291,18 @@ def propose(
         and path.suffix.casefold() == ".pdf"
         and classify_related(path) is None
     ]
+    related_owners: dict[Path, Path] = {}
+    for candidate in entries:
+        if classify_related(candidate) is None:
+            continue
+        matching_mains = [
+            main for main in main_papers if related_to(main, candidate)
+        ]
+        if matching_mains:
+            related_owners[candidate] = max(
+                matching_mains,
+                key=lambda main: len(main.stem),
+            )
     claimed: set[Path] = set()
     for path in main_papers:
         claimed.add(path)
@@ -316,7 +332,11 @@ def propose(
         )
         for candidate in entries:
             kind = classify_related(candidate)
-            if candidate in claimed or kind is None or not related_to(path, candidate):
+            if (
+                candidate in claimed
+                or kind is None
+                or related_owners.get(candidate) != path
+            ):
                 continue
             items.append(
                 {
