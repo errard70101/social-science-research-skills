@@ -2,7 +2,95 @@
 from __future__ import annotations
 
 import argparse
+import re
 from pathlib import Path
+
+INPUT_COMMAND_RE = re.compile(r"\\(?:input|include)\s*\{([^{}]+)\}")
+CITATION_COMMAND_RE = re.compile(
+    r"""
+    \\(?:
+        citeauthor|citeyear|citealp|citealt|citep|citet|cite|
+        parencite|textcite|autocite
+    )
+    \*?
+    (?:\s*\[[^\]]*\]){0,2}
+    \s*\{([^{}]*)\}
+    """,
+    re.VERBOSE,
+)
+
+
+def _resolve_project_path(path: Path, root: Path) -> tuple[Path, Path]:
+    resolved_root = root.resolve()
+    resolved_path = path.resolve()
+    try:
+        resolved_path.relative_to(resolved_root)
+    except ValueError as exc:
+        raise ValueError(f"{resolved_path} is outside project root") from exc
+    return resolved_path, resolved_root
+
+
+def strip_tex_comment(line: str) -> str:
+    for index, character in enumerate(line):
+        if character != "%":
+            continue
+        backslashes = 0
+        position = index - 1
+        while position >= 0 and line[position] == "\\":
+            backslashes += 1
+            position -= 1
+        if backslashes % 2 == 0:
+            return line[:index]
+    return line
+
+
+def discover_tex_files(main: Path, root: Path) -> list[Path]:
+    resolved_main, resolved_root = _resolve_project_path(main, root)
+    discovered: set[Path] = set()
+
+    def visit(source: Path) -> None:
+        if source in discovered:
+            return
+        if not source.is_file():
+            raise FileNotFoundError(source)
+        discovered.add(source)
+
+        for line in source.read_text().splitlines():
+            uncommented = strip_tex_comment(line)
+            for match in INPUT_COMMAND_RE.finditer(uncommented):
+                included = Path(match.group(1).strip())
+                if included.suffix != ".tex":
+                    included = Path(f"{included}.tex")
+                candidate, _ = _resolve_project_path(
+                    source.parent / included, resolved_root
+                )
+                visit(candidate)
+
+    visit(resolved_main)
+    return [resolved_main, *sorted(discovered - {resolved_main})]
+
+
+def scan_citations(source: Path, root: Path) -> list[dict[str, str | int]]:
+    resolved_source, resolved_root = _resolve_project_path(source, root)
+    if not resolved_source.is_file():
+        raise FileNotFoundError(resolved_source)
+    relative_source = resolved_source.relative_to(resolved_root).as_posix()
+    citations: list[dict[str, str | int]] = []
+
+    for line_number, line in enumerate(resolved_source.read_text().splitlines(), 1):
+        uncommented = strip_tex_comment(line)
+        for match in CITATION_COMMAND_RE.finditer(uncommented):
+            for raw_key in match.group(1).split(","):
+                key = raw_key.strip()
+                if key:
+                    citations.append(
+                        {
+                            "key": key,
+                            "source": relative_source,
+                            "line": line_number,
+                        }
+                    )
+    return citations
 
 
 def build_parser() -> argparse.ArgumentParser:
