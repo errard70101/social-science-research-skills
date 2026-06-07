@@ -131,6 +131,28 @@ def test_parse_bibtex_ignores_fake_entry_in_real_percent_comment(
     assert entries[0]["start"] == text.index("@article{real")
 
 
+def test_parse_bibtex_masks_comments_between_fields(bibliography_module):
+    text = (
+        "@misc{example,\n"
+        "  year = {2024}, % publication year\n"
+        "  title = {A Parsed Title},\n"
+        "}\n"
+    )
+
+    assert bibliography_module.parse_bibtex_entries(text) == [
+        {
+            "type": "misc",
+            "key": "example",
+            "fields": {
+                "year": "2024",
+                "title": "A Parsed Title",
+            },
+            "start": 0,
+            "end": text.rindex("}"),
+        }
+    ]
+
+
 @pytest.mark.parametrize(
     "text",
     [

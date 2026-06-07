@@ -254,6 +254,108 @@ def _strip_outer_value(value: str) -> str:
     return value
 
 
+def _is_escaped(text: str, index: int) -> bool:
+    backslashes = 0
+    position = index - 1
+    while position >= 0 and text[position] == "\\":
+        backslashes += 1
+        position -= 1
+    return backslashes % 2 == 1
+
+
+def _mask_comment(masked: list[str], text: str, index: int) -> int:
+    while index < len(text) and text[index] not in "\r\n":
+        masked[index] = " "
+        index += 1
+    return index
+
+
+def _mask_entry_comments(
+    masked: list[str], text: str, opener_index: int, opener: str
+) -> int:
+    index = opener_index + 1
+    entry_brace_depth = 1 if opener == "{" else 0
+    entry_parenthesis_depth = 1 if opener == "(" else 0
+    value_brace_depth = 0
+    quoted_value = False
+    bare_value = False
+    awaiting_value = False
+    escaped = False
+
+    while index < len(text):
+        character = text[index]
+
+        if quoted_value:
+            if escaped:
+                escaped = False
+            elif character == "\\":
+                escaped = True
+            elif character == '"':
+                quoted_value = False
+            index += 1
+            continue
+
+        if value_brace_depth:
+            if not _is_escaped(text, index):
+                if character == "{":
+                    value_brace_depth += 1
+                    if opener == "{":
+                        entry_brace_depth += 1
+                elif character == "}":
+                    value_brace_depth -= 1
+                    if opener == "{":
+                        entry_brace_depth -= 1
+            index += 1
+            continue
+
+        if bare_value:
+            if character == ",":
+                bare_value = False
+            elif (opener, character) in {("{", "}"), ("(", ")")}:
+                return index
+            index += 1
+            continue
+
+        if character == "%" and not _is_escaped(text, index):
+            index = _mask_comment(masked, text, index)
+            continue
+
+        if awaiting_value:
+            if character.isspace():
+                index += 1
+                continue
+            awaiting_value = False
+            if character == "{":
+                value_brace_depth = 1
+                if opener == "{":
+                    entry_brace_depth += 1
+            elif character == '"':
+                quoted_value = True
+            else:
+                bare_value = True
+            index += 1
+            continue
+
+        if character == "=":
+            awaiting_value = True
+        elif opener == "{":
+            if character == "{":
+                entry_brace_depth += 1
+            elif character == "}":
+                entry_brace_depth -= 1
+                if entry_brace_depth == 0:
+                    return index
+        elif character == "(":
+            entry_parenthesis_depth += 1
+        elif character == ")":
+            entry_parenthesis_depth -= 1
+            if entry_parenthesis_depth == 0:
+                return index
+        index += 1
+
+    raise ValueError(f"unbalanced BibTeX entry at index {opener_index}")
+
+
 def _mask_bibtex_comments(text: str) -> str:
     masked = list(text)
     index = 0
@@ -262,25 +364,21 @@ def _mask_bibtex_comments(text: str) -> str:
         entry_match = BIBTEX_ENTRY_RE.match(text, index)
         if entry_match:
             opener_index = entry_match.end() - 1
-            index = _find_entry_end(text, opener_index, entry_match.group(2)) + 1
+            index = (
+                _mask_entry_comments(masked, text, opener_index, entry_match.group(2))
+                + 1
+            )
             continue
 
         if text[index] != "%":
             index += 1
             continue
 
-        backslashes = 0
-        position = index - 1
-        while position >= 0 and text[position] == "\\":
-            backslashes += 1
-            position -= 1
-        if backslashes % 2:
+        if _is_escaped(text, index):
             index += 1
             continue
 
-        while index < len(text) and text[index] not in "\r\n":
-            masked[index] = " "
-            index += 1
+        index = _mask_comment(masked, text, index)
 
     return "".join(masked)
 
