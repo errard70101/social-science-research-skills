@@ -95,6 +95,42 @@ def test_parse_bibtex_preserves_indexes_after_inline_percent_comment(
     assert entry["end"] == text.rindex("}")
 
 
+def test_parse_bibtex_preserves_percent_signs_inside_field_values(
+    bibliography_module,
+):
+    text = (
+        "@article{percentages,\n"
+        r"  title = {Growth of 10\%},"
+        "\n"
+        '  url = "https://example.test/a%20b",\n'
+        "}\n"
+    )
+
+    assert bibliography_module.parse_bibtex_entries(text) == [
+        {
+            "type": "article",
+            "key": "percentages",
+            "fields": {
+                "title": r"Growth of 10\%",
+                "url": "https://example.test/a%20b",
+            },
+            "start": 0,
+            "end": text.rindex("}"),
+        }
+    ]
+
+
+def test_parse_bibtex_ignores_fake_entry_in_real_percent_comment(
+    bibliography_module,
+):
+    text = "% real comment @article{fake, title={Fake}}\n@article{real, title={Real}}\n"
+
+    entries = bibliography_module.parse_bibtex_entries(text)
+
+    assert [entry["key"] for entry in entries] == ["real"]
+    assert entries[0]["start"] == text.index("@article{real")
+
+
 @pytest.mark.parametrize(
     "text",
     [

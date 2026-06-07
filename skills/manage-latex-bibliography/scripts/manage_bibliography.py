@@ -255,20 +255,34 @@ def _strip_outer_value(value: str) -> str:
 
 
 def _mask_bibtex_comments(text: str) -> str:
-    masked_lines: list[str] = []
-    for line in text.splitlines(keepends=True):
-        content = line.rstrip("\r\n")
-        line_ending = line[len(content) :]
-        comment_start = content.find("%")
-        if comment_start == -1:
-            masked_lines.append(line)
-        else:
-            masked_lines.append(
-                content[:comment_start]
-                + " " * (len(content) - comment_start)
-                + line_ending
-            )
-    return "".join(masked_lines)
+    masked = list(text)
+    index = 0
+
+    while index < len(text):
+        entry_match = BIBTEX_ENTRY_RE.match(text, index)
+        if entry_match:
+            opener_index = entry_match.end() - 1
+            index = _find_entry_end(text, opener_index, entry_match.group(2)) + 1
+            continue
+
+        if text[index] != "%":
+            index += 1
+            continue
+
+        backslashes = 0
+        position = index - 1
+        while position >= 0 and text[position] == "\\":
+            backslashes += 1
+            position -= 1
+        if backslashes % 2:
+            index += 1
+            continue
+
+        while index < len(text) and text[index] not in "\r\n":
+            masked[index] = " "
+            index += 1
+
+    return "".join(masked)
 
 
 def parse_bibtex_entries(text: str) -> list[dict[str, object]]:
