@@ -5,6 +5,7 @@ import argparse
 import hashlib
 import json
 import re
+import unicodedata
 from pathlib import Path
 from typing import Any
 
@@ -89,6 +90,25 @@ DOI_PREFIX_RE = re.compile(
 BIBTEX_DIRECTIVES = {"comment", "preamble", "string"}
 TRAILING_DOI_PUNCTUATION = ".,;:"
 DELIMITER_PAIRS = {")": "(", "]": "[", "}": "{"}
+TITLE_STOP_WORDS = {
+    "a",
+    "an",
+    "and",
+    "as",
+    "at",
+    "but",
+    "by",
+    "for",
+    "from",
+    "in",
+    "nor",
+    "of",
+    "on",
+    "or",
+    "the",
+    "to",
+    "with",
+}
 
 
 def sha256_file(path: Path) -> str:
@@ -561,6 +581,121 @@ def find_duplicate_identifiers(entries: list[dict[str, object]]) -> list[str]:
                     + ", ".join(sorted(keys, key=str.casefold))
                 )
     return messages
+
+
+def _ascii_identifier(value: str) -> str:
+    normalized = unicodedata.normalize("NFKD", value)
+    ascii_value = normalized.encode("ascii", "ignore").decode("ascii")
+    return re.sub(r"[^a-z0-9]", "", ascii_value.lower())
+
+
+def _first_author_family(author_field: str) -> str:
+    first_author = re.split(r"\s+and\s+", author_field, maxsplit=1, flags=re.I)[0]
+    first_author = first_author.replace("{", "").replace("}", "").strip()
+    if not first_author:
+        return ""
+    family = (
+        first_author.split(",", maxsplit=1)[0]
+        if "," in first_author
+        else first_author.split()[-1]
+    )
+    return _ascii_identifier(family)
+
+
+def _semantic_title_words(title: str) -> list[str]:
+    plain = re.sub(r"\\[A-Za-z]+", " ", title)
+    plain = re.sub(r"[{}$]", " ", plain)
+    return [
+        _ascii_identifier(word)
+        for word in re.findall(r"[A-Za-z0-9]+", plain)
+        if word.lower() not in TITLE_STOP_WORDS and _ascii_identifier(word)
+    ]
+
+
+def generate_citation_key(fields: dict[str, str], existing: set[str]) -> str:
+    author = _first_author_family(fields.get("author", ""))
+    year = re.sub(r"\D", "", fields.get("year", ""))
+    words = _semantic_title_words(fields.get("title", ""))
+    if not author or not year or not words:
+        raise ValueError("author, year, and title are required for citation key")
+    for count in range(1, len(words) + 1):
+        candidate = f"{author}{year}{''.join(words[:count])}"
+        if candidate not in existing:
+            return candidate
+    raise ValueError("unable to generate unique semantic citation key")
+
+
+def _protected_title_segments(value: str) -> list[tuple[str, bool]]:
+    segments: list[tuple[str, bool]] = []
+    plain_start = 0
+    index = 0
+    while index < len(value):
+        end = None
+        if value[index] == "{":
+            end = _find_entry_end(value, index, "{")
+        elif value[index] == "$" and not _is_escaped(value, index):
+            end = value.find("$", index + 1)
+            if end < 0:
+                raise ValueError("unbalanced math in title")
+        elif value[index] == "\\":
+            command = re.match(r"\\(?:[A-Za-z]+|.)", value[index:])
+            if command:
+                end = index + len(command.group()) - 1
+        if end is None:
+            index += 1
+            continue
+        if plain_start < index:
+            segments.append((value[plain_start:index], False))
+        segments.append((value[index : end + 1], True))
+        index = end + 1
+        plain_start = index
+    if plain_start < len(value):
+        segments.append((value[plain_start:], False))
+    return segments
+
+
+def headline_title(value: str) -> str:
+    tokens: list[tuple[str, str]] = []
+    for segment, protected in _protected_title_segments(value):
+        if protected:
+            tokens.append((segment, "protected"))
+            continue
+        for token in re.findall(r"\s+|[A-Za-z]+(?:['-][A-Za-z]+)*|.", segment):
+            kind = (
+                "word"
+                if re.fullmatch(r"[A-Za-z]+(?:['-][A-Za-z]+)*", token)
+                else "other"
+            )
+            tokens.append((token, kind))
+
+    word_indexes = [
+        index
+        for index, (_, kind) in enumerate(tokens)
+        if kind in {"word", "protected"}
+    ]
+    last_word = word_indexes[-1] if word_indexes else -1
+    capitalize_next = True
+    result = []
+    for index, (token, kind) in enumerate(tokens):
+        if kind == "protected":
+            result.append(token)
+            capitalize_next = False
+        elif kind == "word":
+            lower = token.lower()
+            capitalize = (
+                capitalize_next
+                or index == last_word
+                or lower not in TITLE_STOP_WORDS
+            )
+            result.append(
+                token[:1].upper() + token[1:].lower() if capitalize else lower
+            )
+            capitalize_next = False
+        else:
+            result.append(token)
+            if ":" in token:
+                capitalize_next = True
+    return "".join(result)
 
 
 def _empty_entry(key: str) -> dict[str, object]:

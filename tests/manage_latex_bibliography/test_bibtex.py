@@ -216,3 +216,56 @@ def test_find_duplicate_identifiers_normalizes_doi_and_isbn(
         "duplicate DOI 10.1000/abc: one, two",
         "duplicate ISBN 9781402894626: one, two",
     ]
+
+
+def test_generate_citation_key_skips_stop_words_and_resolves_collision(
+    bibliography_module,
+):
+    fields = {
+        "author": "Acemoglu, Daron and Johnson, Simon",
+        "year": "2001",
+        "title": "The Colonial Origins of Comparative Development",
+    }
+
+    assert (
+        bibliography_module.generate_citation_key(fields, set())
+        == "acemoglu2001colonial"
+    )
+    assert (
+        bibliography_module.generate_citation_key(
+            fields, {"acemoglu2001colonial"}
+        )
+        == "acemoglu2001colonialorigins"
+    )
+
+
+def test_generate_citation_key_requires_semantic_components(
+    bibliography_module,
+):
+    with pytest.raises(
+        ValueError, match="author, year, and title are required"
+    ):
+        bibliography_module.generate_citation_key(
+            {"author": "", "year": "2024", "title": "The Study"},
+            set(),
+        )
+
+
+def test_headline_title_preserves_protected_content(bibliography_module):
+    title = (
+        "the effects of {AI} on {U.S.} labor markets: "
+        r"evidence from $R^2$ and \LaTeX"
+    )
+
+    assert bibliography_module.headline_title(title) == (
+        "The Effects of {AI} on {U.S.} Labor Markets: "
+        r"Evidence from $R^2$ and \LaTeX"
+    )
+
+
+def test_headline_title_capitalizes_first_last_and_post_colon_words(
+    bibliography_module,
+):
+    assert bibliography_module.headline_title(
+        "war and peace: evidence in and out"
+    ) == "War and Peace: Evidence in and Out"
