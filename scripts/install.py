@@ -16,6 +16,20 @@ TARGET_PATHS = {
 NAME_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
+def discover_skills(skills_root: Path = None) -> list[str]:
+    """Discover all skill directory names under skills/ directory.
+
+    Args:
+        skills_root: Path to the skills directory. Defaults to repo_root/skills.
+
+    Returns:
+        Sorted list of skill directory names.
+    """
+    if skills_root is None:
+        skills_root = Path(__file__).resolve().parents[1] / "skills"
+    return sorted(path.name for path in skills_root.iterdir() if path.is_dir())
+
+
 def parse_frontmatter(path: Path) -> dict[str, str]:
     lines = path.read_text(encoding="utf-8").splitlines()
     if not lines or lines[0] != "---":

@@ -68,3 +68,9 @@ def test_validate_skill_rejects_mismatched_name(install_module, tmp_path):
         assert "must match" in str(error)
     else:
         raise AssertionError("mismatched skill names must fail")
+
+
+def test_install_discovers_summary_skill(install_module):
+    skills = sorted(install_module.discover_skills())
+    assert "rename-and-organize-references" in skills
+    assert "summarize-academic-paper" in skills
