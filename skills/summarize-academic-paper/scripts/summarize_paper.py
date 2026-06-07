@@ -30,6 +30,11 @@ CITATION_PDF_META = re.compile(
 DOI_PATTERN = re.compile(
     r"^(?:doi:)?(10\.\d{4,9}/[-._;()/:A-Z0-9]+)$", re.IGNORECASE
 )
+CAPTION_PATTERN = re.compile(
+    r"^(?P<kind>Table|Figure)\s+(?P<number>[A-Za-z0-9]+)"
+    r"[\.:—\-]\s*(?P<caption>.+?)$",
+    re.IGNORECASE,
+)
 
 
 def _utc_now_iso() -> str:
@@ -406,6 +411,31 @@ def _extract_embedded_metadata(reader) -> dict[str, str]:
     return {str(key): str(value) for key, value in metadata.items()}
 
 
+def collect_caption_candidates(
+    pages: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    for page in pages:
+        for line in page.get("text", "").splitlines():
+            stripped = line.strip()
+            match = CAPTION_PATTERN.match(stripped)
+            if not match:
+                continue
+            kind = match.group("kind").lower()
+            number = match.group("number")
+            label = f"{kind.capitalize()} {number}"
+            caption = match.group("caption").strip()
+            candidates.append(
+                {
+                    "label": label,
+                    "caption": caption,
+                    "page": page["page"],
+                    "kind": kind,
+                }
+            )
+    return candidates
+
+
 def extract(
     fetch_path: Path,
     output_path: Path,
@@ -433,7 +463,7 @@ def extract(
         "embedded_metadata": metadata,
         "title_guess": title_guess,
         "author_guesses": author_guesses,
-        "table_candidates": [],
+        "table_candidates": collect_caption_candidates(pages),
         "warnings": warnings,
     }
     output_path.parent.mkdir(parents=True, exist_ok=True)
