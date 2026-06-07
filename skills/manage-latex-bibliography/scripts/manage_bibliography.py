@@ -2,8 +2,72 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import re
 from pathlib import Path
+from typing import Any
+
+SCHEMA_VERSION = 1
+STATUSES = {
+    "candidate",
+    "verified",
+    "needs-user-confirmation",
+    "approved",
+    "rejected",
+    "unresolved",
+}
+PROPOSAL_FIELDS = {
+    "schema_version",
+    "project_root",
+    "main_tex",
+    "bibliography_system",
+    "target_bib",
+    "citations",
+    "new_entries",
+    "existing_entry_corrections",
+    "inferred_references",
+    "tex_changes",
+    "unresolved",
+    "verification_report",
+    "warnings",
+    "file_digests",
+}
+ENTRY_FIELDS = {
+    "key",
+    "type",
+    "fields",
+    "identifiers",
+    "sources",
+    "conflicts",
+    "status",
+    "verifier",
+    "requires_user_approval",
+    "approved",
+}
+SUPPORTED_ENTRY_TYPES = {
+    "article",
+    "book",
+    "incollection",
+    "inproceedings",
+    "phdthesis",
+    "techreport",
+    "unpublished",
+    "misc",
+}
+REQUIRED_ENTRY_FIELDS = {
+    "article": ({"author", "title", "journal", "year"},),
+    "book": (
+        {"author", "title", "publisher", "year"},
+        {"editor", "title", "publisher", "year"},
+    ),
+    "incollection": ({"author", "title", "booktitle", "publisher", "year"},),
+    "inproceedings": ({"author", "title", "booktitle", "year"},),
+    "phdthesis": ({"author", "title", "school", "year"},),
+    "techreport": ({"author", "title", "institution", "year"},),
+    "unpublished": ({"author", "title", "note"},),
+    "misc": (set(),),
+}
 
 INPUT_COMMAND_RE = re.compile(r"\\(?:input|include)\s*\{([^{}]+)\}")
 CITATION_COMMAND_RE = re.compile(
@@ -29,6 +93,41 @@ DOI_PREFIX_RE = re.compile(
 BIBTEX_DIRECTIVES = {"comment", "preamble", "string"}
 TRAILING_DOI_PUNCTUATION = ".,;:"
 DELIMITER_PAIRS = {")": "(", "]": "[", "}": "{"}
+
+
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        for chunk in iter(lambda: source.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _uncommented_tex(path: Path) -> str:
+    text = path.read_text(encoding="utf-8")
+    return "\n".join(strip_tex_comment(line) for line in text.splitlines())
+
+
+def select_main_tex(project: Path) -> tuple[Path, Path]:
+    selected = project.resolve()
+    if selected.is_file():
+        if selected.suffix.lower() != ".tex":
+            raise ValueError("project file must be a .tex file")
+        return selected.parent, selected
+    if not selected.is_dir():
+        raise ValueError(f"project does not exist: {selected}")
+
+    candidates = [
+        path.resolve()
+        for path in sorted(selected.glob("*.tex"))
+        if re.search(r"\\documentclass(?:\s*\[[^\]]*\])?\s*\{", _uncommented_tex(path))
+    ]
+    if len(candidates) != 1:
+        raise ValueError(
+            "project directory must contain exactly one top-level .tex file "
+            "with \\documentclass"
+        )
+    return selected, candidates[0]
 
 
 def _resolve_project_path(path: Path, root: Path) -> tuple[Path, Path]:
@@ -468,6 +567,316 @@ def find_duplicate_identifiers(entries: list[dict[str, object]]) -> list[str]:
     return messages
 
 
+def _empty_entry(key: str) -> dict[str, object]:
+    return {
+        "key": key,
+        "type": "",
+        "fields": {},
+        "identifiers": {},
+        "sources": [],
+        "conflicts": [],
+        "status": "candidate",
+        "verifier": None,
+        "requires_user_approval": False,
+        "approved": False,
+    }
+
+
+def _select_target(
+    bibliography: dict[str, object],
+) -> tuple[str, list[str], list[dict[str, str]]]:
+    system = str(bibliography["system"])
+    targets = bibliography["targets"]
+    styles = bibliography["styles"]
+    if not isinstance(targets, list) or not isinstance(styles, list):
+        raise ValueError("invalid bibliography detection result")
+
+    warnings: list[str] = []
+    tex_changes: list[dict[str, str]] = []
+    if len(targets) > 1:
+        raise ValueError("expected exactly one bibliography target")
+    if system == "biblatex":
+        if not targets:
+            raise ValueError("biblatex project must declare exactly one target")
+        warnings.append("biblatex detected; aea.bst is not activated")
+        return str(targets[0]), warnings, tex_changes
+
+    target = str(targets[0]) if targets else "references.bib"
+    non_aea_styles = sorted(style for style in styles if style != "aea")
+    if non_aea_styles:
+        warnings.append(
+            "existing bibliography style preserved: " + ", ".join(non_aea_styles)
+        )
+    return target, warnings, tex_changes
+
+
+def build_scan_proposal(project: Path) -> dict[str, object]:
+    root, main = select_main_tex(project)
+    sources = discover_tex_files(main, root)
+    bibliography = detect_bibliography(sources, root)
+    target_bib, warnings, tex_changes = _select_target(bibliography)
+    target_path, _ = _resolve_project_path(root / target_bib, root)
+
+    existing_entries: list[dict[str, object]] = []
+    if target_path.exists():
+        if not target_path.is_file():
+            raise ValueError(f"bibliography target is not a file: {target_bib}")
+        existing_entries = parse_bibtex_entries(target_path.read_text(encoding="utf-8"))
+
+    citations = [
+        citation for source in sources for citation in scan_citations(source, root)
+    ]
+    existing_keys = {str(entry["key"]) for entry in existing_entries}
+    missing_keys = sorted(
+        {str(citation["key"]) for citation in citations} - existing_keys,
+        key=str.casefold,
+    )
+
+    if (
+        bibliography["system"] == "bibtex"
+        and not bibliography["targets"]
+        and not bibliography["styles"]
+    ):
+        tex_changes.append(
+            {
+                "file": main.relative_to(root).as_posix(),
+                "status": "verified",
+                "before": "\\end{document}",
+                "after": (
+                    "\\bibliographystyle{aea}\n"
+                    "\\bibliography{references}\n"
+                    "\\end{document}"
+                ),
+            }
+        )
+
+    digest_paths = list(sources)
+    if target_path.is_file():
+        digest_paths.append(target_path)
+    file_digests = {
+        path.relative_to(root).as_posix(): sha256_file(path)
+        for path in sorted(set(digest_paths))
+    }
+
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "project_root": str(root),
+        "main_tex": main.relative_to(root).as_posix(),
+        "bibliography_system": bibliography["system"],
+        "target_bib": target_bib,
+        "citations": citations,
+        "new_entries": [_empty_entry(key) for key in missing_keys],
+        "existing_entry_corrections": [],
+        "inferred_references": [],
+        "tex_changes": tex_changes,
+        "unresolved": [],
+        "verification_report": [],
+        "warnings": warnings,
+        "file_digests": file_digests,
+    }
+
+
+def _require_exact_fields(
+    value: dict[str, Any], expected: set[str], label: str
+) -> None:
+    actual = set(value)
+    if actual != expected:
+        missing = sorted(expected - actual)
+        unknown = sorted(actual - expected)
+        raise ValueError(
+            f"{label} schema mismatch; missing={missing}, unknown={unknown}"
+        )
+
+
+def validate_entry(entry: object, label: str = "entry") -> None:
+    if not isinstance(entry, dict):
+        raise ValueError(f"{label} must be an object")
+    _require_exact_fields(entry, ENTRY_FIELDS, label)
+
+    status = entry["status"]
+    if status not in STATUSES:
+        raise ValueError(f"{label} has unknown status: {status}")
+    if not isinstance(entry["key"], str) or not entry["key"].strip():
+        raise ValueError(f"{label} requires a citation key")
+    fields = entry["fields"]
+    if not isinstance(fields, dict):
+        raise ValueError(f"{label} fields must be an object")
+    if not isinstance(entry["identifiers"], dict):
+        raise ValueError(f"{label} identifiers must be an object")
+    if status == "rejected":
+        return
+
+    entry_type = entry["type"]
+    if entry_type not in SUPPORTED_ENTRY_TYPES:
+        raise ValueError(f"{label} has unsupported entry type: {entry_type}")
+
+    alternatives = REQUIRED_ENTRY_FIELDS[str(entry_type)]
+    if not any(required <= set(fields) for required in alternatives):
+        options = ["+".join(sorted(required)) for required in alternatives]
+        raise ValueError(
+            f"{label} missing required fields for {entry_type}: " + " or ".join(options)
+        )
+
+    if status in {"verified", "approved"}:
+        if not entry["verifier"]:
+            raise ValueError(f"{label} requires a verifier")
+        if not isinstance(entry["sources"], list) or not entry["sources"]:
+            raise ValueError(f"{label} requires sources")
+    if entry["requires_user_approval"] and not entry["approved"]:
+        raise ValueError(f"{label} requires user approval")
+
+
+def _validate_entry_group(
+    proposal: dict[str, Any],
+    field: str,
+    allowed_statuses: set[str],
+    *,
+    approval_required: bool = False,
+) -> list[dict[str, Any]]:
+    entries = proposal[field]
+    if not isinstance(entries, list):
+        raise ValueError(f"{field} must be a list")
+    accepted: list[dict[str, Any]] = []
+    for index, entry in enumerate(entries):
+        label = f"{field}[{index}]"
+        if not isinstance(entry, dict):
+            raise ValueError(f"{label} must be an object")
+        status = entry.get("status")
+        if status not in STATUSES:
+            raise ValueError(f"{label} has unknown status: {status}")
+        if status not in allowed_statuses:
+            raise ValueError(
+                f"{label} must be verified, approved, or rejected as applicable"
+            )
+        validate_entry(entry, label)
+        if status == "rejected":
+            continue
+        if approval_required and (
+            status != "approved"
+            or entry.get("requires_user_approval") is not True
+            or entry.get("approved") is not True
+        ):
+            kind = "inferred reference" if field == "inferred_references" else label
+            raise ValueError(f"{kind} requires user approval")
+        accepted.append(entry)
+    return accepted
+
+
+def _entry_for_duplicate_check(entry: dict[str, Any]) -> dict[str, object]:
+    fields = dict(entry["fields"])
+    identifiers = entry["identifiers"]
+    if not isinstance(identifiers, dict):
+        raise ValueError("entry identifiers must be an object")
+    for name in ("doi", "isbn"):
+        if identifiers.get(name):
+            fields[name] = identifiers[name]
+    return {"key": entry["key"], "fields": fields}
+
+
+def _validate_duplicates(
+    existing: list[dict[str, object]],
+    additions: list[dict[str, Any]],
+) -> None:
+    existing_keys = {str(entry["key"]) for entry in existing}
+    addition_keys = [str(entry["key"]) for entry in additions]
+    duplicate_keys = sorted(
+        existing_keys & set(addition_keys)
+        | {key for key in addition_keys if addition_keys.count(key) > 1},
+        key=str.casefold,
+    )
+    if duplicate_keys:
+        raise ValueError("duplicate citation keys: " + ", ".join(duplicate_keys))
+
+    messages = find_duplicate_identifiers(
+        [*existing, *[_entry_for_duplicate_check(entry) for entry in additions]]
+    )
+    if messages:
+        raise ValueError("; ".join(messages))
+
+
+def validate_proposal(proposal: object) -> None:
+    if not isinstance(proposal, dict):
+        raise ValueError("proposal must be an object")
+    _require_exact_fields(proposal, PROPOSAL_FIELDS, "proposal")
+    if proposal["schema_version"] != SCHEMA_VERSION:
+        raise ValueError(f"unsupported schema version: {proposal['schema_version']}")
+    if proposal["bibliography_system"] not in {"bibtex", "biblatex"}:
+        raise ValueError("invalid bibliography system")
+
+    root = Path(str(proposal["project_root"])).resolve()
+    if not root.is_dir():
+        raise ValueError(f"project root does not exist: {root}")
+    main, _ = _resolve_project_path(root / str(proposal["main_tex"]), root)
+    if not main.is_file():
+        raise ValueError("main_tex does not exist")
+    target, _ = _resolve_project_path(root / str(proposal["target_bib"]), root)
+
+    file_digests = proposal["file_digests"]
+    if not isinstance(file_digests, dict):
+        raise ValueError("file_digests must be an object")
+    for relative_path, expected_digest in file_digests.items():
+        path, _ = _resolve_project_path(root / str(relative_path), root)
+        if not path.is_file() or sha256_file(path) != expected_digest:
+            raise ValueError(f"stale file digest: {relative_path}")
+    target_relative = target.relative_to(root).as_posix()
+    if target_relative not in file_digests and target.exists():
+        raise ValueError(f"stale bibliography target: {target_relative}")
+
+    for field in (
+        "citations",
+        "tex_changes",
+        "unresolved",
+        "verification_report",
+        "warnings",
+    ):
+        if not isinstance(proposal[field], list):
+            raise ValueError(f"{field} must be a list")
+        for index, item in enumerate(proposal[field]):
+            if (
+                isinstance(item, dict)
+                and "status" in item
+                and item["status"] not in STATUSES
+            ):
+                raise ValueError(
+                    f"{field}[{index}] has unknown status: {item['status']}"
+                )
+
+    new_entries = _validate_entry_group(
+        proposal, "new_entries", {"verified", "approved", "rejected"}
+    )
+    corrections = _validate_entry_group(
+        proposal,
+        "existing_entry_corrections",
+        {"verified", "approved", "rejected"},
+        approval_required=True,
+    )
+    inferred_entries = _validate_entry_group(
+        proposal,
+        "inferred_references",
+        {"verified", "approved", "rejected"},
+        approval_required=True,
+    )
+
+    existing_entries: list[dict[str, object]] = []
+    if target.is_file():
+        existing_entries = parse_bibtex_entries(target.read_text(encoding="utf-8"))
+    existing_by_key = {str(entry["key"]): entry for entry in existing_entries}
+    correction_keys = [str(entry["key"]) for entry in corrections]
+    missing_correction_keys = sorted(set(correction_keys) - set(existing_by_key))
+    if missing_correction_keys:
+        raise ValueError(
+            "corrections reference missing citation keys: "
+            + ", ".join(missing_correction_keys)
+        )
+    if len(correction_keys) != len(set(correction_keys)):
+        raise ValueError("duplicate correction citation keys")
+    for correction in corrections:
+        existing_by_key[str(correction["key"])] = _entry_for_duplicate_check(correction)
+    _validate_duplicates(
+        list(existing_by_key.values()), [*new_entries, *inferred_entries]
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Scan, validate, and update a LaTeX bibliography."
@@ -495,6 +904,17 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "install-aea-style" and not args.confirm_download:
         raise SystemExit("--confirm-download is required")
+    if args.command == "scan":
+        proposal = build_scan_proposal(args.project)
+        args.output.write_text(
+            json.dumps(proposal, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+    elif args.command == "validate":
+        proposal = json.loads(args.proposal.read_text(encoding="utf-8"))
+        validate_proposal(proposal)
+    elif args.command == "apply":
+        raise SystemExit("apply is not implemented")
     return 0
 
 
