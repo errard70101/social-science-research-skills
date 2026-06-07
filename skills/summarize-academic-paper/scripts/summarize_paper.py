@@ -657,6 +657,22 @@ def _build_visual_block(
             f"p.~{page_number}. Reproduced for summary purposes.}}\n"
             "\\end{figure}\n"
         )
+    if kind == "table":
+        notes = visual.get("notes") or []
+        notes_block = "\n".join(
+            f"      \\item {note}" for note in notes
+        )
+        return (
+            "\\begin{table}[ht]\n"
+            "  \\centering\n"
+            "  \\begin{threeparttable}\n"
+            f"    {visual['latex_table']}\n"
+            "    \\begin{tablenotes}\\small\n"
+            f"{notes_block}\n"
+            "    \\end{tablenotes}\n"
+            "  \\end{threeparttable}\n"
+            "\\end{table}\n"
+        )
     raise NotImplementedError(
         f"headline_visual.kind = {kind!r} not yet implemented"
     )
