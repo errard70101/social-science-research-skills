@@ -581,14 +581,82 @@ def format_author_string(authors: list[str]) -> str:
     return f"{surnames[0]} et al."
 
 
+def _render_page_to_png(pdf_path: Path, page_number: int) -> bytes:
+    import fitz  # type: ignore[import-not-found]
+
+    document = fitz.open(str(pdf_path))
+    try:
+        page = document.load_page(page_number - 1)
+        matrix = fitz.Matrix(2.0, 2.0)
+        pixmap = page.get_pixmap(matrix=matrix, alpha=False)
+        return pixmap.tobytes("png")
+    finally:
+        document.close()
+
+
+def _slug_label(label: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-")
+
+
+def _ensure_candidate(
+    label: str, candidates: list[dict[str, Any]]
+) -> dict[str, Any]:
+    for candidate in candidates:
+        if candidate["label"].lower() == label.lower():
+            return candidate
+    raise ValueError(
+        f"requested headline visual {label!r} not in extract candidates"
+    )
+
+
+def _save_visual_image(
+    pdf_path: Path,
+    page_number: int,
+    asset_dir: Path,
+    label: str,
+) -> Path:
+    try:
+        payload = _render_page_to_png(pdf_path, page_number)
+    except ImportError as error:
+        raise RuntimeError(
+            "Cropping the headline visual requires PyMuPDF, available "
+            "via the optional render extra. "
+            "Install it with: pip install '.[render]'"
+        ) from error
+    asset_dir.mkdir(parents=True, exist_ok=True)
+    destination = asset_dir / f"{_slug_label(label)}.png"
+    destination.write_bytes(payload)
+    return destination
+
+
 def _build_visual_block(
     visual: dict[str, Any],
     paper_citation_key: str,
-    figure_relative_dir: Path | None,
+    pdf_path: Path,
+    extract_candidates: list[dict[str, Any]],
+    asset_dir: Path,
+    asset_relative_dir: str,
 ) -> str:
     kind = visual.get("kind", "none")
     if kind == "none":
         return ""
+    if kind == "image":
+        label = visual["label"]
+        candidate = _ensure_candidate(label, extract_candidates)
+        page_number = int(visual.get("page", candidate["page"]))
+        image_path = _save_visual_image(
+            pdf_path, page_number, asset_dir, label
+        )
+        relative = f"{asset_relative_dir}/{image_path.name}"
+        return (
+            "\\begin{figure}[ht]\n"
+            "  \\centering\n"
+            f"  \\includegraphics[width=0.95\\linewidth]{{{relative}}}\n"
+            "  \\caption*{\\small Source: "
+            f"{label} of \\citet{{{paper_citation_key}}}, "
+            f"p.~{page_number}. Reproduced for summary purposes.}}\n"
+            "\\end{figure}\n"
+        )
     raise NotImplementedError(
         f"headline_visual.kind = {kind!r} not yet implemented"
     )
@@ -643,7 +711,31 @@ def render(
 ) -> dict[str, Any]:
     content = json.loads(content_path.read_text(encoding="utf-8"))
     validate_content(content)
-    json.loads(extract_path.read_text(encoding="utf-8"))
+    extract_artifact = json.loads(
+        extract_path.read_text(encoding="utf-8")
+    )
+    pdf_path = Path(extract_artifact["pdf_path"])
+    visual = content["headline_visual"]
+    if visual["kind"] == "image":
+        requested = include_table or include_figure
+        if not requested:
+            raise ValueError(
+                "headline_visual.kind is 'image' but no "
+                "--include-table or --include-figure was supplied"
+            )
+        if requested.lower() != visual["label"].lower():
+            raise ValueError(
+                "include flag "
+                f"{requested!r} does not match "
+                f"headline_visual.label {visual['label']!r}"
+            )
+    if visual["kind"] == "table" and not reproduce_tables:
+        raise ValueError(
+            "headline_visual.kind is 'table' but --reproduce-tables "
+            "was not supplied"
+        )
+    summary_stem = output_tex.stem
+    asset_dir = output_tex.parent / summary_stem / "figures"
     context = dict(content)
     context["paper"] = dict(content["paper"])
     context["paper"]["author_string"] = format_author_string(
@@ -652,9 +744,12 @@ def render(
     for section in CONTENT_REQUIRED_SECTIONS:
         context[section] = _expand_cite_placeholders(context[section])
     context["headline_visual_block"] = _build_visual_block(
-        content["headline_visual"],
+        visual,
         content["paper"]["citation_key"],
-        figure_relative_dir=None,
+        pdf_path,
+        extract_artifact.get("table_candidates", []),
+        asset_dir,
+        asset_relative_dir=f"{summary_stem}/figures",
     )
     template = _load_template()
     rendered = _substitute(template, context)
