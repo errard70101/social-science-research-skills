@@ -1072,9 +1072,58 @@ def _accepted_entries(
     ]
 
 
+def prepare_tex_changes(
+    proposal: dict[str, Any], root: Path
+) -> list[tuple[Path, str]]:
+    changes = proposal["tex_changes"]
+    if not changes:
+        return []
+    if proposal["bibliography_system"] != "bibtex":
+        raise ValueError("cannot apply BibTeX commands to a biblatex project")
+    if len(changes) != 1:
+        raise ValueError("expected at most one TeX bibliography change")
+
+    change = changes[0]
+    expected_fields = {"file", "status", "action", "commands"}
+    if not isinstance(change, dict) or set(change) != expected_fields:
+        raise ValueError("invalid TeX change schema")
+    if change["status"] != "verified":
+        raise ValueError("TeX change must be verified")
+    if change["action"] != "insert-before-end-document":
+        raise ValueError("unsupported TeX change action")
+    if change["file"] != proposal["main_tex"]:
+        raise ValueError("TeX change must target the main document")
+    commands = change["commands"]
+    if not isinstance(commands, list) or not all(
+        isinstance(command, str) for command in commands
+    ):
+        raise ValueError("TeX change commands must be strings")
+
+    source, _ = _resolve_project_path(root / str(change["file"]), root)
+    sources = discover_tex_files(source, root)
+    config = detect_bibliography(sources, root)
+    expected_commands = ["\\bibliography{references}"]
+    if not config["styles"]:
+        expected_commands.insert(0, "\\bibliographystyle{aea}")
+    if config["targets"] or commands != expected_commands:
+        raise ValueError("bibliography configuration changed since scan")
+
+    text = source.read_text(encoding="utf-8")
+    marker = "\\end{document}"
+    marker_index = text.rfind(marker)
+    if marker_index < 0:
+        raise ValueError(f"missing {marker} in {change['file']}")
+    prefix = text[:marker_index]
+    if prefix and not prefix.endswith("\n"):
+        prefix += "\n"
+    replacement = prefix + "\n".join(commands) + "\n" + text[marker_index:]
+    return [(source, replacement)]
+
+
 def apply_proposal(proposal: dict[str, Any]) -> dict[str, object]:
     validate_proposal(proposal)
     root = Path(str(proposal["project_root"])).resolve()
+    prepared_tex = prepare_tex_changes(proposal, root)
     target, _ = _resolve_project_path(root / str(proposal["target_bib"]), root)
     text = target.read_text(encoding="utf-8") if target.exists() else ""
     parsed = parse_bibtex_entries(text)
@@ -1112,6 +1161,8 @@ def apply_proposal(proposal: dict[str, Any]) -> dict[str, object]:
         text += "\n"
 
     atomic_write(target, text)
+    for source, replacement in prepared_tex:
+        atomic_write(source, replacement)
     applied = [*corrections, *additions]
     rejected = [
         entry
@@ -1137,6 +1188,9 @@ def apply_proposal(proposal: dict[str, Any]) -> dict[str, object]:
         "skipped": [entry["citation_key"] for entry in rejected],
         "unresolved": proposal["unresolved"],
         "verification_report": proposal["verification_report"],
+        "changed_tex": [
+            source.relative_to(root).as_posix() for source, _ in prepared_tex
+        ],
     }
     atomic_write(
         root / "bibliography-apply-result.json",
