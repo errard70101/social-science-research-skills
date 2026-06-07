@@ -222,6 +222,46 @@ def test_complete_local_metadata_proposes_offline_at_review_confidence(
     assert mapping["items"][0]["provenance"] == "pdf-metadata"
 
 
+def test_complete_local_metadata_skips_provider_calls(
+    rename_module, tmp_path, monkeypatch
+):
+    source = tmp_path / "local.pdf"
+    source.write_bytes(b"fake-pdf")
+    monkeypatch.setattr(
+        rename_module,
+        "read_pdf_candidate",
+        lambda path: {
+            "title": "Local Evidence",
+            "year": 2024,
+            "authors": [{"family_name": "Lee"}],
+            "doi": "10.1234/local",
+            "source": "pdf-metadata",
+        },
+    )
+
+    class ProviderSpy:
+        def __init__(self):
+            self.calls = []
+
+        def lookup_doi(self, doi):
+            self.calls.append(("doi", doi))
+            return None
+
+        def search_title(self, title):
+            self.calls.append(("title", title))
+            return None
+
+    provider = ProviderSpy()
+
+    mapping = rename_module.propose(
+        tmp_path, tmp_path / "proposal.json", provider=provider
+    )
+
+    assert provider.calls == []
+    assert mapping["items"][0]["confidence"] == "review"
+    assert mapping["items"][0]["provenance"] == "pdf-metadata"
+
+
 def test_incomplete_local_metadata_stays_unresolved_offline(
     rename_module, tmp_path, monkeypatch
 ):
@@ -360,7 +400,7 @@ def test_provider_exception_leaves_source_unresolved(
     assert mapping["unresolved"][0]["source"] == "study.pdf"
 
 
-def test_openalex_metadata_preserves_fields_without_guessing_family_names(
+def test_openalex_metadata_marks_fallback_family_names_as_inferred(
     rename_module,
 ):
     work = {
@@ -380,11 +420,145 @@ def test_openalex_metadata_preserves_fields_without_guessing_family_names(
         "year": 2024,
         "authors": [
             {"display_name": "Ada van Lee", "family_name": "van Lee"},
-            {"display_name": "Bo Kim", "family_name": ""},
+            {
+                "display_name": "Bo Kim",
+                "family_name": "Kim",
+                "family_name_inferred": True,
+            },
         ],
         "doi": "10.1234/example",
         "source": "openalex",
+        "metadata_quality": "inferred-author-names",
+        "requires_review": True,
     }
+
+
+def test_openalex_uses_raw_author_name_for_conservative_fallback(rename_module):
+    work = {
+        "title": "Trade and Credit",
+        "publication_year": 2024,
+        "doi": "https://doi.org/10.1234/example",
+        "authorships": [
+            {
+                "author": {"display_name": "A. Lee"},
+                "raw_author_name": "Lee, Ada",
+            }
+        ],
+    }
+
+    metadata = rename_module.OpenAlexProvider()._metadata(work)
+
+    assert metadata["authors"] == [
+        {
+            "display_name": "A. Lee",
+            "family_name": "Lee",
+            "family_name_inferred": True,
+        }
+    ]
+    assert metadata["requires_review"] is True
+
+
+def test_openalex_leaves_ambiguous_compound_author_unresolved(rename_module):
+    work = {
+        "title": "Trade and Credit",
+        "publication_year": 2024,
+        "doi": "https://doi.org/10.1234/example",
+        "authorships": [
+            {
+                "author": {"display_name": "Ada van Lee"},
+                "raw_author_name": "Ada van Lee",
+            }
+        ],
+    }
+
+    metadata = rename_module.OpenAlexProvider()._metadata(work)
+
+    assert metadata["authors"] == [
+        {"display_name": "Ada van Lee", "family_name": ""}
+    ]
+    assert metadata["metadata_quality"] == "unresolved-author-names"
+    assert metadata["requires_review"] is True
+
+
+def test_inferred_openalex_doi_author_requires_review_confidence(
+    rename_module, tmp_path, monkeypatch
+):
+    source = tmp_path / "study.pdf"
+    source.write_bytes(b"fake-pdf")
+    monkeypatch.setattr(
+        rename_module,
+        "read_pdf_candidate",
+        lambda path: {"doi": "10.1234/example"},
+    )
+    metadata = rename_module.OpenAlexProvider()._metadata(
+        {
+            "title": "Trade and Credit",
+            "publication_year": 2024,
+            "doi": "https://doi.org/10.1234/example",
+            "authorships": [
+                {
+                    "author": {"display_name": "Ada Lee"},
+                    "raw_author_name": "Ada Lee",
+                }
+            ],
+        }
+    )
+
+    class OpenAlexStub:
+        def lookup_doi(self, doi):
+            return metadata
+
+        def search_title(self, title):
+            return None
+
+    mapping = rename_module.propose(
+        tmp_path, tmp_path / "proposal.json", provider=OpenAlexStub()
+    )
+
+    assert mapping["items"][0]["destination"] == "Lee_2024_Trade_and_Credit.pdf"
+    assert mapping["items"][0]["confidence"] == "review"
+    assert mapping["items"][0]["provenance"] == "doi-lookup"
+
+
+def test_structured_openalex_doi_author_can_be_high_confidence(
+    rename_module, tmp_path, monkeypatch
+):
+    source = tmp_path / "study.pdf"
+    source.write_bytes(b"fake-pdf")
+    monkeypatch.setattr(
+        rename_module,
+        "read_pdf_candidate",
+        lambda path: {"doi": "10.1234/example"},
+    )
+    metadata = rename_module.OpenAlexProvider()._metadata(
+        {
+            "title": "Trade and Credit",
+            "publication_year": 2024,
+            "doi": "https://doi.org/10.1234/example",
+            "authorships": [
+                {
+                    "author": {
+                        "display_name": "Ada van Lee",
+                        "family_name": "van Lee",
+                    },
+                    "raw_author_name": "Ada van Lee",
+                }
+            ],
+        }
+    )
+
+    class OpenAlexStub:
+        def lookup_doi(self, doi):
+            return metadata
+
+        def search_title(self, title):
+            return None
+
+    mapping = rename_module.propose(
+        tmp_path, tmp_path / "proposal.json", provider=OpenAlexStub()
+    )
+
+    assert mapping["items"][0]["confidence"] == "high"
 
 
 def test_propose_cli_offline_dispatches_without_openalex(

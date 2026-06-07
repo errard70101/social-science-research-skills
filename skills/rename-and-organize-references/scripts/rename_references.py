@@ -52,21 +52,43 @@ class OpenAlexProvider:
 
     def _metadata(self, work: Mapping[str, Any]) -> dict[str, Any]:
         authors = []
+        has_inferred_author = False
+        has_unresolved_author = False
         for authorship in work.get("authorships", []):
             author = authorship.get("author", {})
-            authors.append(
-                {
-                    "display_name": author.get("display_name", ""),
-                    "family_name": author.get("family_name", ""),
-                }
-            )
-        return {
+            display_name = str(author.get("display_name") or "")
+            structured_family = str(author.get("family_name") or "").strip()
+            author_metadata = {
+                "display_name": display_name,
+                "family_name": structured_family,
+            }
+            if not structured_family:
+                raw_name = str(authorship.get("raw_author_name") or display_name)
+                inferred_family = _infer_author_family_name(raw_name)
+                if inferred_family:
+                    author_metadata["family_name"] = inferred_family
+                    author_metadata["family_name_inferred"] = True
+                    has_inferred_author = True
+                else:
+                    has_unresolved_author = True
+            authors.append(author_metadata)
+        if has_unresolved_author:
+            metadata_quality = "unresolved-author-names"
+        elif has_inferred_author:
+            metadata_quality = "inferred-author-names"
+        else:
+            metadata_quality = "structured-author-names"
+        metadata = {
             "title": work.get("title"),
             "year": work.get("publication_year"),
             "authors": authors,
             "doi": normalize_doi(str(work.get("doi") or "")),
             "source": "openalex",
         }
+        if metadata_quality != "structured-author-names":
+            metadata["metadata_quality"] = metadata_quality
+            metadata["requires_review"] = True
+        return metadata
 
     def lookup_doi(self, doi: str) -> dict[str, Any] | None:
         encoded = urllib.parse.quote(doi, safe="")
@@ -112,6 +134,16 @@ def family_name(author: Mapping[str, Any]) -> str:
 
 def _is_name_suffix(value: str) -> bool:
     return ascii_token(value, allow_hyphen=False).lower() in NAME_SUFFIXES
+
+
+def _infer_author_family_name(value: str) -> str:
+    comma_parts = [part.strip() for part in value.split(",") if part.strip()]
+    if len(comma_parts) == 2 and not _is_name_suffix(comma_parts[1]):
+        return comma_parts[0]
+    tokens = value.split()
+    if len(tokens) == 2 and not _is_name_suffix(tokens[-1]):
+        return tokens[-1]
+    return ""
 
 
 def format_authors(authors: Sequence[Mapping[str, Any]]) -> str:
@@ -295,13 +327,16 @@ def resolve_metadata(
         local = read_pdf_candidate(path)
     except Exception:
         local = {}
+    if _has_required_metadata(local):
+        return ResolutionResult(dict(local), "review", "pdf-metadata")
     if provider and local.get("doi"):
         try:
             metadata = provider.lookup_doi(str(local["doi"]))
         except Exception:
             metadata = None
         if metadata and _has_required_metadata(metadata):
-            return ResolutionResult(dict(metadata), "high", "doi-lookup")
+            confidence = "review" if metadata.get("requires_review") else "high"
+            return ResolutionResult(dict(metadata), confidence, "doi-lookup")
     query = str(local.get("title") or path.stem.replace("_", " "))
     if provider and query:
         try:
@@ -314,8 +349,6 @@ def resolve_metadata(
             and _has_required_metadata(candidate)
         ):
             return ResolutionResult(dict(candidate), "review", "title-search")
-    if _has_required_metadata(local):
-        return ResolutionResult(dict(local), "review", "pdf-metadata")
     return None
 
 
