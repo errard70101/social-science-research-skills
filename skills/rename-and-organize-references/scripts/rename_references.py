@@ -110,11 +110,14 @@ def build_filename(
     kind: str,
     max_length: int = 180,
 ) -> str:
-    authors = format_authors(metadata.get("authors", []))
+    author_entries = metadata.get("authors", [])
+    authors = format_authors(author_entries)
     year_value = metadata.get("year")
     title = clean_title(str(metadata.get("title") or ""))
     if not authors or year_value is None or year_value == "":
         raise ValueError("authors and year are required to generate a filename")
+    if any(not family_name(author) for author in author_entries):
+        raise ValueError("all authors must have a resolvable family name")
     year = normalize_year(year_value)
     if not title:
         raise ValueError("title is required to generate a filename")

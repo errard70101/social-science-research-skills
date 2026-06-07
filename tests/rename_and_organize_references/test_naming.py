@@ -114,6 +114,22 @@ def test_build_filename_accepts_four_digit_year_string(rename_module):
     )
 
 
+def test_build_filename_rejects_partially_unresolved_authors(rename_module):
+    metadata = {
+        "authors": [
+            {"family_name": "One"},
+            {"display_name": "Two, Taylor"},
+            {"display_name": "Jordan Three Jr."},
+            {"family_name": "Four"},
+        ],
+        "year": 2024,
+        "title": "Evidence",
+    }
+
+    with pytest.raises(ValueError, match="authors"):
+        rename_module.build_filename(metadata, kind="main-paper")
+
+
 @pytest.mark.parametrize(
     "year",
     [
