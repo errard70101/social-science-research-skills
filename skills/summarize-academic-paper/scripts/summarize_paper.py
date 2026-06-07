@@ -4,11 +4,27 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
+import urllib.parse
+from collections.abc import Callable
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 FETCH_ARTIFACT_NAME = "summarize-paper-fetch.json"
+
+ARXIV_ABS_PATTERN = re.compile(
+    r"^https?://arxiv\.org/abs/(?P<id>[\w./-]+?)(?:v\d+)?/?$"
+)
+NBER_PAPER_PATTERN = re.compile(
+    r"^https?://(?:www\.)?nber\.org/papers/(?P<id>w?\d+)/?$"
+)
+CITATION_PDF_META = re.compile(
+    r"<meta\s+[^>]*name=[\"']citation_pdf_url[\"']\s+"
+    r"[^>]*content=[\"'](?P<url>[^\"']+)[\"']",
+    re.IGNORECASE,
+)
 
 
 def _utc_now_iso() -> str:
@@ -27,9 +43,139 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _sha256_bytes(payload: bytes) -> str:
+    return hashlib.sha256(payload).hexdigest()
+
+
+@contextmanager
+def _default_http_client():
+    import httpx
+
+    with httpx.Client(
+        follow_redirects=True,
+        headers={"User-Agent": "social-science-research-skills/0.1"},
+        timeout=30.0,
+    ) as client:
+        yield client
+
+
+def _safe_filename_from_url(url: str) -> str:
+    parsed = urllib.parse.urlparse(url)
+    name = Path(parsed.path).name or "download.pdf"
+    if not name.lower().endswith(".pdf"):
+        name = f"{name}.pdf"
+    return name
+
+
+def _unique_path(directory: Path, filename: str) -> Path:
+    candidate = directory / filename
+    if not candidate.exists():
+        return candidate
+    stem = candidate.stem
+    suffix = candidate.suffix
+    for counter in range(1, 1000):
+        attempt = directory / f"{stem}-{counter}{suffix}"
+        if not attempt.exists():
+            return attempt
+    raise RuntimeError(f"could not find a free filename for {filename}")
+
+
+def _rewrite_known_url(url: str) -> tuple[str, str | None]:
+    match = ARXIV_ABS_PATTERN.match(url)
+    if match:
+        return (
+            f"https://arxiv.org/pdf/{match.group('id')}.pdf",
+            "arxiv",
+        )
+    match = NBER_PAPER_PATTERN.match(url)
+    if match:
+        identifier = match.group("id")
+        return (
+            f"https://www.nber.org/papers/{identifier}.pdf",
+            "nber",
+        )
+    return url, None
+
+
+def _is_pdf_response(response) -> bool:
+    return (
+        response.headers.get("content-type", "")
+        .split(";", 1)[0]
+        .strip()
+        .lower()
+        == "application/pdf"
+    )
+
+
+def _save_pdf_bytes(
+    output_dir: Path, source_url: str, content: bytes
+) -> Path:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    destination = _unique_path(
+        output_dir, _safe_filename_from_url(source_url)
+    )
+    destination.write_bytes(content)
+    return destination
+
+
+def _resolve_url(
+    url: str,
+    output_dir: Path,
+    http_client_factory: Callable[[], Any],
+) -> dict[str, Any]:
+    rewritten, hop = _rewrite_known_url(url)
+    resolution_path = ["url"]
+    if hop:
+        resolution_path.append(hop)
+
+    with http_client_factory() as client:
+        response = client.get(rewritten)
+        if _is_pdf_response(response):
+            saved = _save_pdf_bytes(output_dir, rewritten, response.content)
+            return {
+                "pdf_path": str(saved.resolve()),
+                "resolution_path": resolution_path,
+                "source_url": rewritten,
+                "retrieved_at": _utc_now_iso(),
+                "sha256": _sha256_bytes(response.content),
+                "unresolved": None,
+            }
+        meta_match = CITATION_PDF_META.search(
+            response.content.decode("utf-8", errors="replace")
+        )
+        if meta_match:
+            pdf_url = meta_match.group("url")
+            pdf_response = client.get(pdf_url)
+            if _is_pdf_response(pdf_response):
+                saved = _save_pdf_bytes(
+                    output_dir, pdf_url, pdf_response.content
+                )
+                return {
+                    "pdf_path": str(saved.resolve()),
+                    "resolution_path": resolution_path
+                    + ["citation-pdf-meta"],
+                    "source_url": pdf_url,
+                    "retrieved_at": _utc_now_iso(),
+                    "sha256": _sha256_bytes(pdf_response.content),
+                    "unresolved": None,
+                }
+    return {
+        "pdf_path": None,
+        "resolution_path": resolution_path,
+        "source_url": rewritten,
+        "retrieved_at": _utc_now_iso(),
+        "sha256": None,
+        "unresolved": (
+            "response content-type is not application/pdf and no "
+            "citation_pdf_url meta tag was present"
+        ),
+    }
+
+
 def resolve_input(
     input_value: str,
     output_dir: Path,
+    http_client_factory: Callable[[], Any] | None = None,
 ) -> dict[str, Any]:
     candidate = Path(input_value).expanduser()
     if candidate.is_file() and candidate.suffix.lower() == ".pdf":
@@ -42,7 +188,13 @@ def resolve_input(
             "sha256": _sha256_file(resolved),
             "unresolved": None,
         }
-    raise NotImplementedError("non-local resolution not yet implemented")
+    if input_value.startswith(("http://", "https://")):
+        return _resolve_url(
+            input_value,
+            output_dir,
+            http_client_factory or _default_http_client,
+        )
+    raise NotImplementedError("DOI resolution not yet implemented")
 
 
 def fetch(input_value: str, output_dir: Path) -> dict[str, Any]:
