@@ -1,0 +1,4 @@
+interface:
+  display_name: "Rename and Organize References"
+  short_description: "Safely standardize academic reference files"
+  default_prompt: "Use $rename-and-organize-references to propose and review consistent names for my academic reference files."
