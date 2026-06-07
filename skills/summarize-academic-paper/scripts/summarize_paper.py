@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 import re
+import tempfile
 import urllib.parse
 from collections.abc import Callable
 from contextlib import contextmanager
@@ -35,6 +36,8 @@ CAPTION_PATTERN = re.compile(
     r"[\.:—\-]\s*(?P<caption>.+?)$",
     re.IGNORECASE,
 )
+SLOT_PATTERN = re.compile(r"<<\s*([^<>\s][^<>]*?)\s*>>")
+TEMPLATE_RELATIVE_PATH = Path("..") / "references" / "template.tex"
 
 
 def _utc_now_iso() -> str:
@@ -548,6 +551,92 @@ def validate_content(content: dict[str, Any]) -> None:
             )
 
 
+def _surname(author: str) -> str:
+    if "," in author:
+        return author.split(",", 1)[0].strip()
+    parts = author.strip().split()
+    return parts[-1] if parts else author.strip()
+
+
+def format_author_string(authors: list[str]) -> str:
+    surnames = [_surname(author) for author in authors if author.strip()]
+    if not surnames:
+        return ""
+    if len(surnames) == 1:
+        return surnames[0]
+    if len(surnames) == 2:
+        return f"{surnames[0]} and {surnames[1]}"
+    if len(surnames) == 3:
+        return f"{surnames[0]}, {surnames[1]}, and {surnames[2]}"
+    return f"{surnames[0]} et al."
+
+
+def _load_template() -> str:
+    here = Path(__file__).resolve().parent
+    template_path = (here / TEMPLATE_RELATIVE_PATH).resolve()
+    return template_path.read_text(encoding="utf-8")
+
+
+def _slot_value(context: dict[str, Any], dotted_path: str) -> str:
+    current: Any = context
+    for part in dotted_path.split("."):
+        if isinstance(current, dict) and part in current:
+            current = current[part]
+        else:
+            raise KeyError(f"slot {dotted_path!r} is not defined")
+    if current is None:
+        return ""
+    return str(current)
+
+
+def _substitute(template: str, context: dict[str, Any]) -> str:
+    def replace(match: re.Match[str]) -> str:
+        return _slot_value(context, match.group(1))
+
+    return SLOT_PATTERN.sub(replace, template)
+
+
+def _atomic_write_text(destination: Path, payload: str) -> None:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        mode="w",
+        encoding="utf-8",
+        dir=destination.parent,
+        delete=False,
+        suffix=".tmp",
+    ) as handle:
+        handle.write(payload)
+        temp_path = Path(handle.name)
+    temp_path.replace(destination)
+
+
+def render(
+    extract_path: Path,
+    content_path: Path,
+    output_tex: Path,
+    include_table: str | None = None,
+    include_figure: str | None = None,
+    reproduce_tables: bool = False,
+) -> dict[str, Any]:
+    content = json.loads(content_path.read_text(encoding="utf-8"))
+    validate_content(content)
+    json.loads(extract_path.read_text(encoding="utf-8"))
+    context = dict(content)
+    context["paper"] = dict(content["paper"])
+    context["paper"]["author_string"] = format_author_string(
+        content["paper"]["authors"]
+    )
+    context["headline_visual_block"] = ""
+    template = _load_template()
+    rendered = _substitute(template, context)
+    _atomic_write_text(output_tex, rendered)
+    return {
+        "schema_version": 1,
+        "output_tex": str(output_tex.resolve()),
+        "warnings": [],
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
@@ -581,6 +670,15 @@ def main(argv: list[str] | None = None) -> int:
         fetch(input_value=args.input, output_dir=args.output_dir)
     elif args.command == "extract":
         extract(fetch_path=args.fetch, output_path=args.output)
+    elif args.command == "render":
+        render(
+            extract_path=args.extract,
+            content_path=args.content,
+            output_tex=args.output_tex,
+            include_table=args.include_table,
+            include_figure=args.include_figure,
+            reproduce_tables=args.reproduce_tables,
+        )
     return 0
 
 
