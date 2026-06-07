@@ -455,6 +455,10 @@ def extract(
     title_guess = guess_title(first_page_text) or metadata.get("/Title")
     author_guesses = guess_authors(first_page_text)
     warnings: list[str] = []
+    if not any(page["text"].strip() for page in pages):
+        warnings.append("no-extractable-text")
+    if not author_guesses:
+        warnings.append("author-guess-empty")
     artifact = {
         "schema_version": 1,
         "pdf_path": str(pdf_path),

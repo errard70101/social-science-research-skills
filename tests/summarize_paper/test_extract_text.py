@@ -47,7 +47,7 @@ def test_extract_records_per_page_text(
     fetch_path = tmp_path / "summarize-paper-fetch.json"
     fetch_path.write_text(json.dumps(fetch_artifact))
     reader = FakeReader(
-        pages=["Page one body.", "Page two body.", ""],
+        pages=["Page one body.\n\nJane Author, John Author", "Page two body.", ""],
         metadata={"/Title": "Stub Title", "/Author": "Stub Author"},
     )
 
@@ -59,7 +59,7 @@ def test_extract_records_per_page_text(
 
     assert artifact["schema_version"] == 1
     assert artifact["page_count"] == 3
-    assert artifact["pages"][0] == {"page": 1, "text": "Page one body."}
+    assert artifact["pages"][0] == {"page": 1, "text": "Page one body.\n\nJane Author, John Author"}
     assert artifact["pages"][2] == {"page": 3, "text": ""}
     assert artifact["embedded_metadata"] == {
         "/Title": "Stub Title",
