@@ -3,14 +3,19 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import io
 import json
 import os
 import re
+import stat
 import tempfile
 import unicodedata
+import urllib.request
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 SCHEMA_VERSION = 1
 STATUSES = {
@@ -94,6 +99,10 @@ DOI_PREFIX_RE = re.compile(
 BIBTEX_DIRECTIVES = {"comment", "preamble", "string"}
 TRAILING_DOI_PUNCTUATION = ".,;:"
 DELIMITER_PAIRS = {")": "(", "]": "[", "}": "{"}
+AEA_TEMPLATE_URL = "https://www.aeaweb.org/journals/templates/latex_templates"
+MAX_ARCHIVE_BYTES = 5_000_000
+MAX_ARCHIVE_ENTRIES = 100
+MAX_UNCOMPRESSED_BYTES = 20_000_000
 TITLE_STOP_WORDS = {
     "a",
     "an",
@@ -1062,6 +1071,134 @@ def atomic_write(path: Path, text: str) -> None:
         temporary.unlink(missing_ok=True)
 
 
+def atomic_write_bytes(path: Path, contents: bytes) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}."
+    )
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(contents)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def sha256_bytes(value: bytes) -> str:
+    return hashlib.sha256(value).hexdigest()
+
+
+def default_downloader(url: str) -> tuple[str, bytes]:
+    request = urllib.request.Request(
+        url, headers={"User-Agent": "social-science-research-skills/0.1"}
+    )
+    with urllib.request.urlopen(request, timeout=30) as response:
+        contents = response.read(MAX_ARCHIVE_BYTES + 1)
+        final_url = response.geturl()
+    if len(contents) > MAX_ARCHIVE_BYTES:
+        raise ValueError("AEA template archive exceeds size limit")
+    return final_url, contents
+
+
+def _validate_archive_member(member: zipfile.ZipInfo) -> None:
+    normalized = member.filename.replace("\\", "/")
+    parts = Path(normalized).parts
+    if (
+        normalized.startswith("/")
+        or ".." in parts
+        or (parts and parts[0].endswith(":"))
+    ):
+        raise ValueError("unsafe path in AEA template archive")
+    mode = member.external_attr >> 16
+    file_type = stat.S_IFMT(mode)
+    if file_type == stat.S_IFLNK:
+        raise ValueError("links are not allowed in AEA template archive")
+    if not member.is_dir() and file_type not in {0, stat.S_IFREG}:
+        raise ValueError("special files are not allowed in AEA template archive")
+    if member.flag_bits & 0x1:
+        raise ValueError("encrypted files are not allowed in AEA template archive")
+
+
+def extract_aea_style(data: bytes, project: Path) -> dict[str, str]:
+    project = project.resolve()
+    if not project.is_dir():
+        raise ValueError(f"project directory does not exist: {project}")
+    if len(data) > MAX_ARCHIVE_BYTES:
+        raise ValueError("AEA template archive exceeds size limit")
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(data))
+    except zipfile.BadZipFile as error:
+        raise ValueError("AEA template download is not a valid ZIP archive") from error
+    with archive:
+        members = archive.infolist()
+        if len(members) > MAX_ARCHIVE_ENTRIES:
+            raise ValueError("AEA template archive has too many entries")
+        if sum(member.file_size for member in members) > MAX_UNCOMPRESSED_BYTES:
+            raise ValueError("AEA template archive exceeds uncompressed size limit")
+        normalized_names = [
+            member.filename.replace("\\", "/") for member in members
+        ]
+        if len(normalized_names) != len(set(normalized_names)):
+            raise ValueError("duplicate archive member")
+        for member in members:
+            _validate_archive_member(member)
+        styles = [
+            member
+            for member in members
+            if not member.is_dir() and Path(member.filename).name == "aea.bst"
+        ]
+        if len(styles) != 1:
+            raise ValueError("archive must contain exactly one regular aea.bst")
+        contents = archive.read(styles[0])
+        if len(contents) > MAX_UNCOMPRESSED_BYTES:
+            raise ValueError("aea.bst exceeds uncompressed size limit")
+
+    destination = project / "aea.bst"
+    digest = sha256_bytes(contents)
+    if destination.is_symlink():
+        raise ValueError("refusing to overwrite a symbolic-link aea.bst")
+    if destination.exists():
+        if not destination.is_file() or sha256_file(destination) != digest:
+            raise ValueError("refusing to overwrite a different aea.bst")
+        status_value = "unchanged"
+    else:
+        atomic_write_bytes(destination, contents)
+        status_value = "installed"
+    return {
+        "path": str(destination),
+        "sha256": digest,
+        "status": status_value,
+    }
+
+
+def install_aea_style(
+    project: Path, *, downloader=default_downloader
+) -> dict[str, str]:
+    project = project.resolve()
+    final_url, data = downloader(AEA_TEMPLATE_URL)
+    parsed = urlparse(final_url)
+    hostname = (parsed.hostname or "").lower()
+    if parsed.scheme.lower() != "https" or not (
+        hostname == "aeaweb.org" or hostname.endswith(".aeaweb.org")
+    ):
+        raise ValueError("download did not end on the official AEA host")
+    result = extract_aea_style(data, project)
+    result.update(
+        {
+            "source_url": final_url,
+            "retrieved_at": datetime.now(timezone.utc).isoformat(),
+        }
+    )
+    atomic_write(
+        project / "aea-style-download.json",
+        json.dumps(result, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+    )
+    return result
+
+
 def _accepted_entries(
     proposal: dict[str, Any], field: str
 ) -> list[dict[str, Any]]:
@@ -1238,6 +1375,8 @@ def main(argv: list[str] | None = None) -> int:
     elif args.command == "apply":
         proposal = json.loads(args.proposal.read_text(encoding="utf-8"))
         apply_proposal(proposal)
+    elif args.command == "install-aea-style":
+        install_aea_style(args.project)
     return 0
 
 
