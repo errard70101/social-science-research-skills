@@ -8,6 +8,7 @@ import unicodedata
 import urllib.parse
 import urllib.request
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -29,6 +30,13 @@ class MetadataProvider(Protocol):
     def lookup_doi(self, doi: str) -> dict[str, Any] | None: ...
 
     def search_title(self, title: str) -> dict[str, Any] | None: ...
+
+
+@dataclass(frozen=True)
+class ResolutionResult:
+    metadata: dict[str, Any]
+    confidence: str
+    provenance: str
 
 
 class OpenAlexProvider:
@@ -196,11 +204,46 @@ def read_pdf_candidate(path: Path) -> dict[str, Any]:
     )
     doi_match = DOI_PATTERN.search(text)
     metadata = reader.metadata
-    return {
+    candidate = {
         "doi": normalize_doi(doi_match.group(0)) if doi_match else "",
         "title": str(getattr(metadata, "title", "") or ""),
-        "author": str(getattr(metadata, "author", "") or ""),
+        "authors": _parse_pdf_authors(str(getattr(metadata, "author", "") or "")),
+        "source": "pdf-metadata",
     }
+    year = _pdf_metadata_year(metadata)
+    if year is not None:
+        candidate["year"] = year
+    return candidate
+
+
+def _parse_pdf_authors(value: str) -> list[dict[str, str]]:
+    if not value.strip():
+        return []
+    authors = []
+    for display_name in (part.strip() for part in value.split(";")):
+        parts = [part.strip() for part in display_name.split(",")]
+        if len(parts) != 2 or not all(parts):
+            return []
+        family = ascii_token(parts[0])
+        if not family:
+            return []
+        authors.append({"display_name": display_name, "family_name": parts[0]})
+    return authors
+
+
+def _pdf_metadata_year(metadata: Any) -> int | None:
+    candidates = [getattr(metadata, "year", None)]
+    if isinstance(metadata, Mapping):
+        candidates.extend([metadata.get("/Year"), metadata.get("Year")])
+    for value in candidates:
+        if isinstance(value, str) and re.fullmatch(r"[0-9]{4}", value.strip()):
+            return int(value)
+        if isinstance(value, int) and not isinstance(value, bool):
+            try:
+                return int(normalize_year(value))
+            except ValueError:
+                continue
+    return None
 
 
 def accept_title_match(
@@ -247,28 +290,32 @@ def resolve_metadata(
     *,
     provider: MetadataProvider | None,
     threshold: float = 0.9,
-) -> dict[str, Any] | None:
+) -> ResolutionResult | None:
     try:
         local = read_pdf_candidate(path)
     except Exception:
         local = {}
-    if _has_required_metadata(local):
-        return dict(local)
     if provider and local.get("doi"):
         try:
             metadata = provider.lookup_doi(str(local["doi"]))
         except Exception:
             metadata = None
-        if metadata:
-            return metadata
+        if metadata and _has_required_metadata(metadata):
+            return ResolutionResult(dict(metadata), "high", "doi-lookup")
     query = str(local.get("title") or path.stem.replace("_", " "))
     if provider and query:
         try:
             candidate = provider.search_title(query)
         except Exception:
             candidate = None
-        if candidate and accept_title_match(query, candidate, threshold=threshold):
-            return candidate
+        if (
+            candidate
+            and accept_title_match(query, candidate, threshold=threshold)
+            and _has_required_metadata(candidate)
+        ):
+            return ResolutionResult(dict(candidate), "review", "title-search")
+    if _has_required_metadata(local):
+        return ResolutionResult(dict(local), "review", "pdf-metadata")
     return None
 
 
@@ -306,8 +353,8 @@ def propose(
     claimed: set[Path] = set()
     for path in main_papers:
         claimed.add(path)
-        metadata = resolve_metadata(path, provider=provider)
-        if not metadata:
+        resolution = resolve_metadata(path, provider=provider)
+        if not resolution:
             unresolved.append(
                 {
                     "source": path.name,
@@ -315,18 +362,19 @@ def propose(
                 }
             )
             continue
+        metadata = resolution.metadata
         try:
             destination = build_filename(metadata, kind="main-paper")
         except ValueError as error:
             unresolved.append({"source": path.name, "reason": str(error)})
             continue
-        confidence = "high" if metadata.get("doi") else "review"
         items.append(
             {
                 "source": path.name,
                 "destination": destination,
                 "kind": "main-paper",
-                "confidence": confidence,
+                "confidence": resolution.confidence,
+                "provenance": resolution.provenance,
                 "metadata": metadata,
             }
         )
@@ -338,12 +386,19 @@ def propose(
                 or related_owners.get(candidate) != path
             ):
                 continue
+            try:
+                related_destination = build_filename(metadata, kind=kind)
+            except ValueError as error:
+                unresolved.append({"source": candidate.name, "reason": str(error)})
+                claimed.add(candidate)
+                continue
             items.append(
                 {
                     "source": candidate.name,
-                    "destination": build_filename(metadata, kind=kind),
+                    "destination": related_destination,
                     "kind": kind,
-                    "confidence": confidence,
+                    "confidence": resolution.confidence,
+                    "provenance": resolution.provenance,
                     "metadata": metadata,
                 }
             )
