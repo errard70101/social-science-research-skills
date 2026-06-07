@@ -54,6 +54,18 @@ Runtime dependency:
 python -m pip install "pypdf>=5.0"
 ```
 
+### `manage-latex-bibliography`
+
+Scans LaTeX projects for missing citations, creates reviewable bibliography
+proposals, and applies independently verified BibTeX entries with Chicago-style
+headline capitalization.
+
+The skill can configure a traditional BibTeX project for the AEA bibliography
+style. It does not redistribute `aea.bst`; after explicit user confirmation,
+the helper downloads the current LaTeX template directly from the official AEA
+website and extracts the style into the user's project. Online metadata
+verification also requires network access.
+
 ## Development
 
 ```bash
