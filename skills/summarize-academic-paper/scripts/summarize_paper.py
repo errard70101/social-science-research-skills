@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 FETCH_ARTIFACT_NAME = "summarize-paper-fetch.json"
+EXTRACT_ARTIFACT_NAME = "summarize-paper-extract.json"
 
 ARXIV_ABS_PATTERN = re.compile(
     r"^https?://arxiv\.org/abs/(?P<id>[\w./-]+?)(?:v\d+)?/?$"
@@ -315,6 +316,67 @@ def fetch(input_value: str, output_dir: Path) -> dict[str, Any]:
     return artifact
 
 
+def _default_reader_factory(pdf_path: Path):
+    from pypdf import PdfReader
+
+    return PdfReader(str(pdf_path))
+
+
+def _extract_pages(reader) -> list[dict[str, Any]]:
+    pages = []
+    for index, page in enumerate(reader.pages, start=1):
+        try:
+            text = page.extract_text() or ""
+        except Exception:  # noqa: BLE001 - pypdf raises varied errors per page; keep going
+            text = ""
+        pages.append({"page": index, "text": text})
+    return pages
+
+
+def _extract_embedded_metadata(reader) -> dict[str, str]:
+    metadata = getattr(reader, "metadata", None) or {}
+    if not isinstance(metadata, dict):
+        return {
+            str(key): str(value)
+            for key, value in metadata.items()
+        }
+    return {str(key): str(value) for key, value in metadata.items()}
+
+
+def extract(
+    fetch_path: Path,
+    output_path: Path,
+    reader_factory: Callable[[Path], Any] | None = None,
+) -> dict[str, Any]:
+    fetch_artifact = json.loads(fetch_path.read_text(encoding="utf-8"))
+    if fetch_artifact.get("unresolved"):
+        raise ValueError(
+            "fetch artifact is unresolved; cannot extract: "
+            f"{fetch_artifact['unresolved']}"
+        )
+    pdf_path = Path(fetch_artifact["pdf_path"])
+    reader = (reader_factory or _default_reader_factory)(pdf_path)
+    pages = _extract_pages(reader)
+    metadata = _extract_embedded_metadata(reader)
+    warnings: list[str] = []
+    artifact = {
+        "schema_version": 1,
+        "pdf_path": str(pdf_path),
+        "page_count": len(pages),
+        "pages": pages,
+        "embedded_metadata": metadata,
+        "title_guess": None,
+        "author_guesses": [],
+        "table_candidates": [],
+        "warnings": warnings,
+    }
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(
+        json.dumps(artifact, indent=2) + "\n", encoding="utf-8"
+    )
+    return artifact
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description=(
@@ -346,6 +408,8 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "fetch":
         fetch(input_value=args.input, output_dir=args.output_dir)
+    elif args.command == "extract":
+        extract(fetch_path=args.fetch, output_path=args.output)
     return 0
 
 
