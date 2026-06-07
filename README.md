@@ -65,3 +65,24 @@ python -m ruff check .
 Add each canonical skill under `skills/<skill-name>/`. The directory name must
 match the `name` in `SKILL.md`. Keep bundled paths relative and avoid
 client-specific or machine-specific assumptions.
+
+## Roadmap
+
+The following skills are planned for future development:
+
+### 1. `summarize-academic-paper`
+Extracts structured methodology and key findings from academic papers.
+- **Input**: URL to a paper or PDF.
+- **Output**:
+  1. One-sentence summary
+  2. Setup (experimental/empirical design)
+  3. Empirical strategy
+  4. Key result
+  5. Limitations
+  6. Follow-ups
+
+### 2. `generate-bib-references`
+Generates bibliography files complying with specific academic standards.
+- **Goal**: Create a `.bib` file incorporating the `aea.bst` format.
+- **Rules**: All entries must follow headline capitalization style.
+- **Verification**: Uses a dedicated subagent to cross-check and verify reference correctness by searching the web.
