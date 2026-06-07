@@ -333,6 +333,69 @@ def _extract_pages(reader) -> list[dict[str, Any]]:
     return pages
 
 
+AUTHOR_SPLIT_PATTERN = re.compile(r",\s*(?:and\s+)?|\s+and\s+|\s*&\s*")
+TITLE_NOISE_PREFIXES = ("abstract", "draft", "preliminary", "comments")
+
+
+def _candidate_blocks(text: str) -> list[str]:
+    blocks: list[str] = []
+    current: list[str] = []
+    for raw_line in text.splitlines():
+        stripped = raw_line.strip()
+        if stripped:
+            current.append(stripped)
+            continue
+        if current:
+            blocks.append(" ".join(current))
+            current = []
+    if current:
+        blocks.append(" ".join(current))
+    return blocks
+
+
+def guess_title(first_page_text: str) -> str | None:
+    for block in _candidate_blocks(first_page_text):
+        lower = block.lower()
+        if lower.startswith(TITLE_NOISE_PREFIXES):
+            continue
+        if len(block) < 6 or len(block.split()) < 2:
+            continue
+        if block[0].islower():
+            continue
+        return block
+    return None
+
+
+def _looks_like_author_block(block: str) -> bool:
+    if not block or any(ch.isdigit() for ch in block):
+        return False
+    parts = [part.strip() for part in AUTHOR_SPLIT_PATTERN.split(block)]
+    parts = [part for part in parts if part]
+    if not parts:
+        return False
+    for part in parts:
+        words = part.split()
+        if len(words) < 2 or len(words) > 5:
+            return False
+        if not words[0][0].isupper() or not words[-1][0].isupper():
+            return False
+    return True
+
+
+def guess_authors(first_page_text: str) -> list[str]:
+    blocks = _candidate_blocks(first_page_text)
+    if not blocks:
+        return []
+    for block in blocks[1:5]:
+        if _looks_like_author_block(block):
+            return [
+                part.strip()
+                for part in AUTHOR_SPLIT_PATTERN.split(block)
+                if part.strip()
+            ]
+    return []
+
+
 def _extract_embedded_metadata(reader) -> dict[str, str]:
     metadata = getattr(reader, "metadata", None) or {}
     if not isinstance(metadata, dict):
@@ -358,6 +421,9 @@ def extract(
     reader = (reader_factory or _default_reader_factory)(pdf_path)
     pages = _extract_pages(reader)
     metadata = _extract_embedded_metadata(reader)
+    first_page_text = pages[0]["text"] if pages else ""
+    title_guess = guess_title(first_page_text) or metadata.get("/Title")
+    author_guesses = guess_authors(first_page_text)
     warnings: list[str] = []
     artifact = {
         "schema_version": 1,
@@ -365,8 +431,8 @@ def extract(
         "page_count": len(pages),
         "pages": pages,
         "embedded_metadata": metadata,
-        "title_guess": None,
-        "author_guesses": [],
+        "title_guess": title_guess,
+        "author_guesses": author_guesses,
         "table_candidates": [],
         "warnings": warnings,
     }
