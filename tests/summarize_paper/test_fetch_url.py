@@ -187,3 +187,37 @@ def test_non_pdf_response_is_unresolved(summary_module, tmp_path: Path):
     assert result["pdf_path"] is None
     assert result["unresolved"]
     assert "content-type" in result["unresolved"]
+
+
+def test_url_is_preferred_even_if_shadowed_by_local_file(
+    summary_module, tmp_path: Path, monkeypatch
+):
+    shadowed_dir = tmp_path / "https:" / "example.org"
+    shadowed_dir.mkdir(parents=True, exist_ok=True)
+    shadowed_file = shadowed_dir / "paper.pdf"
+    shadowed_file.write_bytes(b"%PDF-1.4 local file content")
+
+    monkeypatch.chdir(tmp_path)
+
+    pdf_bytes = b"%PDF-1.4 remote url content"
+    client = FakeClient(
+        {
+            "https://example.org/paper.pdf": FakeResponse(
+                status_code=200,
+                headers={"content-type": "application/pdf"},
+                content=pdf_bytes,
+                url="https://example.org/paper.pdf",
+            ),
+        }
+    )
+
+    result = summary_module.resolve_input(
+        "https://example.org/paper.pdf",
+        output_dir=tmp_path / "out",
+        http_client_factory=lambda: client,
+    )
+
+    assert result["resolution_path"] == ["url"]
+    assert result["source_url"] == "https://example.org/paper.pdf"
+    assert Path(result["pdf_path"]).read_bytes() == pdf_bytes
+

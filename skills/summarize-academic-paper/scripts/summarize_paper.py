@@ -289,6 +289,12 @@ def resolve_input(
     output_dir: Path,
     http_client_factory: Callable[[], Any] | None = None,
 ) -> dict[str, Any]:
+    if input_value.startswith(("http://", "https://")):
+        return _resolve_url(
+            input_value,
+            output_dir,
+            http_client_factory or _default_http_client,
+        )
     candidate = Path(input_value).expanduser()
     if candidate.is_file() and candidate.suffix.lower() == ".pdf":
         resolved = candidate.resolve()
@@ -300,12 +306,6 @@ def resolve_input(
             "sha256": _sha256_file(resolved),
             "unresolved": None,
         }
-    if input_value.startswith(("http://", "https://")):
-        return _resolve_url(
-            input_value,
-            output_dir,
-            http_client_factory or _default_http_client,
-        )
     if _looks_like_doi(input_value):
         return _resolve_doi(
             input_value,
