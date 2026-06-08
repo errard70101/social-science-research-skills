@@ -51,3 +51,15 @@ def summary_module() -> ModuleType:
         / "scripts"
         / "summarize_paper.py",
     )
+
+
+@pytest.fixture(scope="session")
+def bibliography_module() -> ModuleType:
+    return load_script(
+        "manage_bibliography",
+        REPO_ROOT
+        / "skills"
+        / "manage-latex-bibliography"
+        / "scripts"
+        / "manage_bibliography.py",
+    )
