@@ -54,3 +54,47 @@ def test_caption_regex_ignores_inline_references(summary_module):
     ]
 
     assert summary_module.collect_caption_candidates(pages) == []
+
+
+def test_collect_caption_candidates_expanded_prefixes_and_multiline(summary_module):
+    pages = [
+        {
+            "page": 2,
+            "text": (
+                "Some body text.\n"
+                "Fig. 1: Multi-line figure caption\n"
+                "that continues here.\n"
+                "Unrelated text starts here."
+            )
+        },
+        {
+            "page": 3,
+            "text": (
+                "Appendix Table A.2: Summary of results.\n"
+                "Panel B — Specific details."
+            )
+        }
+    ]
+    
+    candidates = summary_module.collect_caption_candidates(pages)
+    assert candidates == [
+        {
+            "label": "Figure 1",
+            "caption": "Multi-line figure caption that continues here.",
+            "page": 2,
+            "kind": "figure",
+        },
+        {
+            "label": "Appendix Table A.2",
+            "caption": "Summary of results.",
+            "page": 3,
+            "kind": "table",
+        },
+        {
+            "label": "Panel B",
+            "caption": "Specific details.",
+            "page": 3,
+            "kind": "panel",
+        }
+    ]
+

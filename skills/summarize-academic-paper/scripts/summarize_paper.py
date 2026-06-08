@@ -32,8 +32,10 @@ DOI_PATTERN = re.compile(
     r"^(?:doi:)?(10\.\d{4,9}/[-._;()/:A-Z0-9]+)$", re.IGNORECASE
 )
 CAPTION_PATTERN = re.compile(
-    r"^(?P<kind>Table|Figure)\s+(?P<number>[A-Za-z0-9]+)"
-    r"[\.:—\-]\s*(?P<caption>.+?)$",
+    r"^(?P<prefix>Appendix\s+)?"
+    r"(?P<kind>Table|Figure|Fig\.?|Panel)\s+"
+    r"(?P<number>[A-Za-z0-9\.\-]+)"
+    r"\s*[\.:—\-]\s*(?P<caption>.+?)$",
     re.IGNORECASE,
 )
 SLOT_PATTERN = re.compile(r"<<\s*([^<>\s][^<>]*?)\s*>>")
@@ -436,23 +438,69 @@ def collect_caption_candidates(
 ) -> list[dict[str, Any]]:
     candidates: list[dict[str, Any]] = []
     for page in pages:
-        for line in page.get("text", "").splitlines():
-            stripped = line.strip()
+        lines = page.get("text", "").splitlines()
+        num_lines = len(lines)
+        i = 0
+        while i < num_lines:
+            stripped = lines[i].strip()
             match = CAPTION_PATTERN.match(stripped)
             if not match:
+                i += 1
                 continue
-            kind = match.group("kind").lower()
+            
+            prefix = match.group("prefix") or ""
+            kind_str = match.group("kind").lower()
             number = match.group("number")
-            label = f"{kind.capitalize()} {number}"
+            
+            # Normalize kind
+            if kind_str.startswith("fig"):
+                normalized_kind = "figure"
+            elif kind_str == "table":
+                normalized_kind = "table"
+            elif kind_str == "panel":
+                normalized_kind = "panel"
+            else:
+                normalized_kind = kind_str
+
+            # Construct clean label
+            display_kind = normalized_kind.capitalize()
+            if prefix.strip():
+                label = f"{prefix.strip().capitalize()} {display_kind} {number}"
+            else:
+                label = f"{display_kind} {number}"
+                
             caption = match.group("caption").strip()
+            
+            # Lookahead for continuation lines
+            k = 1
+            while i + k < num_lines and k <= 3:
+                next_line = lines[i + k].strip()
+                if not next_line:
+                    break
+                if CAPTION_PATTERN.match(next_line):
+                    break
+                
+                is_continuation = False
+                if not caption.endswith((".", "!", "?")):
+                    is_continuation = True
+                elif next_line[0].islower():
+                    is_continuation = True
+                
+                if is_continuation:
+                    caption = f"{caption} {next_line}"
+                    k += 1
+                else:
+                    break
+            
             candidates.append(
                 {
                     "label": label,
                     "caption": caption,
                     "page": page["page"],
-                    "kind": kind,
+                    "kind": normalized_kind,
                 }
             )
+            i += k
     return candidates
 
 
