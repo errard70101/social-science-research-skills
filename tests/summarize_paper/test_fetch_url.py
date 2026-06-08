@@ -221,3 +221,29 @@ def test_url_is_preferred_even_if_shadowed_by_local_file(
     assert result["source_url"] == "https://example.org/paper.pdf"
     assert Path(result["pdf_path"]).read_bytes() == pdf_bytes
 
+
+def test_url_with_query_params_uses_path_portion_for_filename(summary_module, tmp_path: Path):
+    pdf_bytes = b"%PDF-1.4 stub"
+    client = FakeClient(
+        {
+            "https://example.org/paper.pdf?version=2": FakeResponse(
+                status_code=200,
+                headers={"content-type": "application/pdf"},
+                content=pdf_bytes,
+                url="https://example.org/paper.pdf?version=2",
+            ),
+        }
+    )
+
+    result = summary_module.resolve_input(
+        "https://example.org/paper.pdf?version=2",
+        output_dir=tmp_path,
+        http_client_factory=lambda: client,
+    )
+
+    saved = Path(result["pdf_path"])
+    assert saved.name == "paper.pdf"
+    assert saved.exists()
+    assert saved.read_bytes() == pdf_bytes
+
+
