@@ -384,6 +384,11 @@ def guess_title(first_page_text: str) -> str | None:
     return None
 
 
+LOWERCASE_PARTICLES = {
+    "de", "da", "di", "do", "del", "della", "du", "von", "van", "der", "den", "le", "la", "al"
+}
+
+
 def _looks_like_author_block(block: str) -> bool:
     if not block or any(ch.isdigit() for ch in block):
         return False
@@ -395,7 +400,9 @@ def _looks_like_author_block(block: str) -> bool:
         words = part.split()
         if len(words) < 2 or len(words) > 5:
             return False
-        if not words[0][0].isupper() or not words[-1][0].isupper():
+        first_word_ok = words[0][0].isupper() or words[0].lower() in LOWERCASE_PARTICLES
+        last_word_ok = words[-1][0].isupper()
+        if not first_word_ok or not last_word_ok:
             return False
     return True
 

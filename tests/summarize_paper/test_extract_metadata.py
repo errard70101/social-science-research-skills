@@ -44,3 +44,16 @@ def test_author_guess_handles_ampersand(summary_module):
 
 def test_author_guess_falls_back_to_empty(summary_module):
     assert summary_module.guess_authors("Just a title and nothing else") == []
+
+
+def test_author_guess_handles_lowercase_particles(summary_module):
+    first_page = (
+        "Title\n"
+        "\n"
+        "Roy van der Weide, Jonathan de Quidt, and J. B. De Long\n"
+    )
+    assert summary_module.guess_authors(first_page) == [
+        "Roy van der Weide",
+        "Jonathan de Quidt",
+        "J. B. De Long",
+    ]
