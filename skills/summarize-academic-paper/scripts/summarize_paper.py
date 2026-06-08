@@ -392,10 +392,27 @@ LOWERCASE_PARTICLES = {
 }
 
 
-def _looks_like_author_block(block: str) -> bool:
-    if not block or any(ch.isdigit() for ch in block):
-        return False
+def _clean_author_block(block: str) -> str:
+    """Remove trailing superscript footnote markers from author block."""
+    # Remove trailing digits, asterisks, daggers, etc. from each name part
     parts = [part.strip() for part in AUTHOR_SPLIT_PATTERN.split(block)]
+    cleaned_parts = []
+    for part in parts:
+        # Strip trailing superscript characters: digits, *, †, ‡, §, ¶
+        cleaned = re.sub(r'[\d*†‡§¶]+$', '', part).strip()
+        if cleaned:
+            cleaned_parts.append(cleaned)
+    return " and ".join(cleaned_parts)
+
+
+def _looks_like_author_block(block: str) -> bool:
+    if not block:
+        return False
+    # Clean the block before checking for digits
+    cleaned = _clean_author_block(block)
+    if any(ch.isdigit() for ch in cleaned):
+        return False
+    parts = [part.strip() for part in AUTHOR_SPLIT_PATTERN.split(cleaned)]
     parts = [part for part in parts if part]
     if not parts:
         return False
@@ -416,9 +433,10 @@ def guess_authors(first_page_text: str) -> list[str]:
         return []
     for block in blocks[1:5]:
         if _looks_like_author_block(block):
+            cleaned = _clean_author_block(block)
             return [
                 part.strip()
-                for part in AUTHOR_SPLIT_PATTERN.split(block)
+                for part in AUTHOR_SPLIT_PATTERN.split(cleaned)
                 if part.strip()
             ]
     return []
@@ -622,11 +640,10 @@ def validate_content(content: dict[str, Any]) -> None:
             f"content.headline_visual.kind must be one of {VALID_VISUAL_KINDS}"
         )
     if kind == "image":
-        for field in ("label", "page"):
-            if not visual.get(field):
-                raise ValueError(
-                    f"content.headline_visual.{field} required for image mode"
-                )
+        if not visual.get("label"):
+            raise ValueError(
+                "content.headline_visual.label required for image mode"
+            )
     if kind == "table" and not visual.get("latex_table"):
         raise ValueError(
             "content.headline_visual.latex_table required for table mode"
@@ -738,7 +755,15 @@ def _build_visual_block(
     if kind == "image":
         label = visual["label"]
         candidate = _ensure_candidate(label, extract_candidates)
-        page_number = int(visual.get("page", candidate["page"]))
+        candidate_page = int(candidate["page"])
+        if visual.get("page") is not None:
+            manual_page = int(visual["page"])
+            if manual_page != candidate_page:
+                raise ValueError(
+                    f"headline_visual.page ({manual_page}) does not match "
+                    f"candidate page ({candidate_page}) for label {label!r}"
+                )
+        page_number = candidate_page
         image_path = _save_visual_image(
             pdf_path, page_number, asset_dir, label
         )
@@ -779,6 +804,23 @@ def _load_template() -> str:
     return template_path.read_text(encoding="utf-8")
 
 
+def _escape_latex(text: str) -> str:
+    """Escape special LaTeX characters in text."""
+    replacements = {
+        "\\": "\\textbackslash{}",
+        "&": "\\&",
+        "%": "\\%",
+        "$": "\\$",
+        "#": "\\#",
+        "_": "\\_",
+        "{": "\\{",
+        "}": "\\}",
+        "~": "\\textasciitilde{}",
+        "^": "\\textasciicircum{}",
+    }
+    return "".join(replacements.get(char, char) for char in text)
+
+
 def _slot_value(context: dict[str, Any], dotted_path: str) -> str:
     current: Any = context
     for part in dotted_path.split("."):
@@ -788,7 +830,11 @@ def _slot_value(context: dict[str, Any], dotted_path: str) -> str:
             raise KeyError(f"slot {dotted_path!r} is not defined")
     if current is None:
         return ""
-    return str(current)
+    val = str(current)
+    # Escape LaTeX special chars for paper metadata fields (except citation_key)
+    if dotted_path.startswith("paper.") and dotted_path != "paper.citation_key":
+        val = _escape_latex(val)
+    return val
 
 
 def _substitute(template: str, context: dict[str, Any]) -> str:

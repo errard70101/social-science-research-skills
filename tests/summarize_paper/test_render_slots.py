@@ -104,3 +104,31 @@ def test_render_is_atomic(summary_module, tmp_path: Path):
         name for name in tmp_path.iterdir() if name.suffix == ".tmp"
     ]
     assert siblings == []
+
+
+def test_render_escapes_special_characters_in_paper_metadata(
+    summary_module, tmp_path: Path
+):
+    extract_path = _make_extract(tmp_path)
+    content = _valid_content()
+    content["paper"] = {
+        "authors": ["A & B", r"C\\D"],
+        "year": 2001,
+        "title": r"50% of $x$ #1_2 {draft} \\ ~ ^",
+        "venue": r"R&D_{Lab} 100%",
+        "citation_key": "acemoglu2001colonial",
+    }
+    content_path = tmp_path / "content.json"
+    content_path.write_text(json.dumps(content))
+    output_tex = tmp_path / "summary.tex"
+
+    summary_module.render(
+        extract_path=extract_path,
+        content_path=content_path,
+        output_tex=output_tex,
+    )
+
+    text = output_tex.read_text(encoding="utf-8")
+    assert r"50\% of \$x\$ \#1\_2 \{draft\} \textbackslash{}\textbackslash{} \textasciitilde{} \textasciicircum{}" in text
+    assert r"R\&D\_\{Lab\} 100\%" in text
+    assert r"B and C\textbackslash{}\textbackslash{}D (2001)" in text

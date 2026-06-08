@@ -153,3 +153,34 @@ def test_image_mode_without_pymupdf_fails_loudly(
 
     assert "pymupdf" in str(exc.value).lower()
     assert "render" in str(exc.value).lower()
+
+
+def test_image_mode_rejects_inconsistent_manual_page(
+    summary_module, tmp_path: Path, monkeypatch
+):
+    pdf = tmp_path / "paper.pdf"
+    pdf.write_bytes(b"%PDF-1.4 stub")
+    extract_path = _make_extract_with_candidate(tmp_path, label="Table 3", page=11)
+    content_path = tmp_path / "content.json"
+    content_path.write_text(
+        json.dumps(_content_for_image(label="Table 3", page=999))
+    )
+    output_tex = tmp_path / "summary.tex"
+
+    monkeypatch.setattr(
+        summary_module,
+        "_render_page_to_png",
+        lambda *args, **kwargs: b"",
+    )
+
+    with pytest.raises(ValueError) as exc:
+        summary_module.render(
+            extract_path=extract_path,
+            content_path=content_path,
+            output_tex=output_tex,
+            include_table="Table 3",
+        )
+
+    assert "does not match candidate page" in str(exc.value)
+    assert "999" in str(exc.value)
+    assert "11" in str(exc.value)

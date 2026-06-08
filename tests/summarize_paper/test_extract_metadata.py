@@ -57,3 +57,16 @@ def test_author_guess_handles_lowercase_particles(summary_module):
         "Jonathan de Quidt",
         "J. B. De Long",
     ]
+
+
+def test_author_guess_strips_trailing_superscript_markers(summary_module):
+    first_page = (
+        "Title\n"
+        "\n"
+        "Daron Acemoglu1, Simon Johnson* and James A. Robinson\u2020\n"
+    )
+    assert summary_module.guess_authors(first_page) == [
+        "Daron Acemoglu",
+        "Simon Johnson",
+        "James A. Robinson",
+    ]

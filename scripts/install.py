@@ -16,7 +16,7 @@ TARGET_PATHS = {
 NAME_PATTERN = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 
-def discover_skills(skills_root: Path = None) -> list[str]:
+def discover_skills(skills_root: Path | None = None) -> list[str]:
     """Discover all skill directory names under skills/ directory.
 
     Args:
