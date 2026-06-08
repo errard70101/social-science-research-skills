@@ -597,11 +597,26 @@ def validate_content(content: dict[str, Any]) -> None:
             )
 
 
+SURNAME_PARTICLES = {
+    "de", "da", "di", "do", "del", "della", "du", "von", "van", "der", "den", "le", "la", "al"
+}
+
+
 def _surname(author: str) -> str:
     if "," in author:
         return author.split(",", 1)[0].strip()
     parts = author.strip().split()
-    return parts[-1] if parts else author.strip()
+    if not parts:
+        return author.strip()
+
+    surname_parts = [parts[-1]]
+    for word in reversed(parts[:-1]):
+        if word.lower() in SURNAME_PARTICLES:
+            surname_parts.insert(0, word)
+        else:
+            break
+    return " ".join(surname_parts)
+
 
 
 def format_author_string(authors: list[str]) -> str:

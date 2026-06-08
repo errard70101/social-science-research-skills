@@ -97,3 +97,12 @@ def test_empty_predecessor_list_emits_no_cite(
     assert "\\citep{}" not in placement_section
     assert "\\cite{" not in placement_section
     assert "\\citep{" not in placement_section
+
+
+def test_surname_handling_with_particles(summary_module):
+    assert summary_module._surname("J. B. De Long") == "De Long"
+    assert summary_module._surname("Roy van der Weide") == "van der Weide"
+    assert summary_module._surname("Jonathan de Quidt") == "de Quidt"
+    assert summary_module._surname("John Doe") == "Doe"
+    assert summary_module._surname("de Quidt, Jonathan") == "de Quidt"
+

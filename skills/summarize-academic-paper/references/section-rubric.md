@@ -90,6 +90,11 @@ that a non-subfield reader is likely to notice. Do not invent limitations.
 What does this paper open up that the next paper should pick up? At most one
 sentence each for two or three follow-ups.
 
+## Author Names
+
+When writing summary content JSON:
+- If author names are ambiguous or contain multi-word surnames (e.g. `De Long`, `van der Weide`), prefer using the `Lastname, Firstname` format in the `authors` list (e.g. `["De Long, J. B.", "van der Weide, Roy"]`). This format ensures unambiguous surname extraction.
+
 ## Do Not
 
 - Do not invent coefficients, standard errors, sample sizes, statistical
