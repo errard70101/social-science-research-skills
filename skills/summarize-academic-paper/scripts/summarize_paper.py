@@ -214,8 +214,9 @@ def _resolve_via_unpaywall(
     email = os.environ.get("UNPAYWALL_EMAIL")
     if not email:
         return None
+    encoded_email = urllib.parse.quote(email)
     response = client.get(
-        f"https://api.unpaywall.org/v2/{doi}?email={email}"
+        f"https://api.unpaywall.org/v2/{doi}?email={encoded_email}"
     )
     if response.status_code >= 400:
         return None
@@ -425,11 +426,6 @@ def guess_authors(first_page_text: str) -> list[str]:
 
 def _extract_embedded_metadata(reader) -> dict[str, str]:
     metadata = getattr(reader, "metadata", None) or {}
-    if not isinstance(metadata, dict):
-        return {
-            str(key): str(value)
-            for key, value in metadata.items()
-        }
     return {str(key): str(value) for key, value in metadata.items()}
 
 

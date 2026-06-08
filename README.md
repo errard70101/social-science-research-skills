@@ -58,8 +58,8 @@ python -m pip install "pypdf>=5.0"
 
 Produces a two-page LaTeX summary of an economics paper from a PDF, URL,
 or DOI. The summary is written for an economics PhD outside the paper's
-subfield and emits citation keys for `manage-latex-bibliography` to
-populate `references.bib` after rendering.
+subfield and emits citation keys that can be used to populate
+`references.bib` after rendering.
 
 Runtime dependencies:
 
