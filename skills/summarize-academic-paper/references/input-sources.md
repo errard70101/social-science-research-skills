@@ -28,6 +28,9 @@ When `UNPAYWALL_EMAIL` is not set and the DOI does not resolve directly to a
 PDF, the `fetch` artifact records `unresolved` with a message that names
 `UNPAYWALL_EMAIL` so the user can decide whether to set it.
 
+> [!NOTE]
+> Real Unpaywall DOI fallback requests require a valid `UNPAYWALL_EMAIL` environment variable. To manually validate the Unpaywall integration, set `UNPAYWALL_EMAIL` in your environment and run with a real open-access DOI (e.g. `10.1038/nature12345`). Do not run live network tests in the automated test suite.
+
 ## When fetch fails
 
 - The skill never invents a URL. If neither the rewrite, the citation-meta
