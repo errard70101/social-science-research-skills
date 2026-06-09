@@ -42,6 +42,18 @@ def install_module() -> ModuleType:
 
 
 @pytest.fixture(scope="session")
+def summary_module() -> ModuleType:
+    return load_script(
+        "summarize_paper",
+        REPO_ROOT
+        / "skills"
+        / "summarize-academic-paper"
+        / "scripts"
+        / "summarize_paper.py",
+    )
+
+
+@pytest.fixture(scope="session")
 def bibliography_module() -> ModuleType:
     return load_script(
         "manage_bibliography",

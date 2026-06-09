@@ -1,0 +1,4 @@
+interface:
+  display_name: "Summarize Academic Paper"
+  short_description: "Produce a two-page LaTeX summary of an economics paper"
+  default_prompt: "Use $summarize-academic-paper to draft a two-page LaTeX summary of the paper at <PDF, URL, or DOI>."

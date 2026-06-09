@@ -16,6 +16,15 @@ SKILLS = {
         "references/verification-rules.md",
         "references/title-case-rules.md",
     ],
+    "summarize-academic-paper": [
+        "scripts/summarize_paper.py",
+        "references/section-rubric.md",
+        "references/input-sources.md",
+    ],
+    "skill-development-workflow": [
+        "scripts/skill_development_workflow.py",
+        "references/prompt-contracts.md",
+    ],
 }
 
 
@@ -51,6 +60,18 @@ def test_skill_references_existing_bundled_files(name, expected):
     text = (skill / "SKILL.md").read_text(encoding="utf-8")
     assert all(value in text for value in expected)
     assert all((skill / value).is_file() for value in expected)
+
+
+SUMMARY_SKILL = ROOT / "skills" / "summarize-academic-paper"
+
+
+def test_summary_skill_template_exists_and_has_slots():
+    template = (SUMMARY_SKILL / "references" / "template.tex").read_text(
+        encoding="utf-8"
+    )
+    assert "\\documentclass" in template
+    assert "<<paper.title>>" in template
+    assert "<<headline_visual_block>>" in template
 
 
 def test_bibliography_skill_does_not_bundle_aea_style():

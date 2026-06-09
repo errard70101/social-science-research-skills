@@ -120,3 +120,42 @@ def test_main_accepts_help(module_fixture, request):
         module.main(["--help"])
 
     assert exc_info.value.code == 0
+
+
+def test_summary_cli_parser_loads(summary_module):
+    parser = summary_module.build_parser()
+    subparsers_action = next(
+        action
+        for action in parser._actions
+        if isinstance(action, argparse._SubParsersAction)
+    )
+    assert set(subparsers_action.choices) == {"fetch", "extract", "render"}
+
+
+def test_summary_main_accepts_help(summary_module):
+    with pytest.raises(SystemExit) as exc_info:
+        summary_module.main(["--help"])
+
+    assert exc_info.value.code == 0
+
+
+def test_summary_render_include_flags_are_mutually_exclusive(summary_module):
+    parser = summary_module.build_parser()
+    with pytest.raises(SystemExit) as exc_info:
+        parser.parse_args(
+            [
+                "render",
+                "--extract",
+                "extract.json",
+                "--content",
+                "content.json",
+                "--output-tex",
+                "out.tex",
+                "--include-table",
+                "Table 1",
+                "--include-figure",
+                "Figure 1",
+            ]
+        )
+
+    assert exc_info.value.code == 2

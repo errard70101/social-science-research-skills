@@ -1,0 +1,58 @@
+\documentclass[11pt]{article}
+
+\usepackage{fontspec}
+\setmainfont{Latin Modern Roman}
+\usepackage[margin=0.9in]{geometry}
+\usepackage{microtype}
+\usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{threeparttable}
+\usepackage{caption}
+\usepackage{graphicx}
+\usepackage[hidelinks]{hyperref}
+\usepackage{natbib}
+
+\setlength{\parskip}{0.4em}
+\setlength{\parindent}{0pt}
+
+\title{\textbf{<<paper.title>>} \\
+       \large{Summary notes}}
+\author{}
+\date{\today}
+
+\begin{document}
+\maketitle
+
+\noindent\textbf{Reference.} <<paper.author_string>> (<<paper.year>>),
+``<<paper.title>>,'' \emph{<<paper.venue>>}. \citep{<<paper.citation_key>>}
+
+\subsection*{In one sentence}
+<<one_sentence>>
+
+\subsection*{Setup}
+<<setup>>
+
+\subsection*{Empirical strategy}
+<<empirical_strategy>>
+
+\subsection*{Identification, in plain English}
+<<identification_cartoon>>
+
+<<headline_visual_block>>
+
+\subsection*{Key result}
+<<key_result>>
+
+\subsection*{Where this sits}
+<<placement_in_literature>>
+
+\subsection*{Limitations}
+<<limitations>>
+
+\subsection*{Follow-ups}
+<<followups>>
+
+\bibliographystyle{aea}
+\bibliography{references}
+
+\end{document}
