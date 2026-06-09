@@ -189,6 +189,64 @@ def test_non_pdf_response_is_unresolved(summary_module, tmp_path: Path):
     assert "content-type" in result["unresolved"]
 
 
+def test_http_error_status_is_unresolved(summary_module, tmp_path: Path):
+    client = FakeClient(
+        {
+            "https://example.org/missing.pdf": FakeResponse(
+                status_code=404,
+                headers={"content-type": "text/html"},
+                content=b"<html>not found</html>",
+                url="https://example.org/missing.pdf",
+            ),
+        }
+    )
+
+    result = summary_module.resolve_input(
+        "https://example.org/missing.pdf",
+        output_dir=tmp_path,
+        http_client_factory=lambda: client,
+    )
+
+    assert result["pdf_path"] is None
+    assert result["unresolved"]
+    assert "404" in result["unresolved"]
+
+
+def test_citation_pdf_meta_404_is_unresolved(summary_module, tmp_path: Path):
+    landing = (
+        "<html><head>"
+        '<meta name="citation_pdf_url" '
+        'content="https://journal.example/article.pdf">'
+        "</head></html>"
+    )
+    client = FakeClient(
+        {
+            "https://journal.example/article": FakeResponse(
+                status_code=200,
+                headers={"content-type": "text/html"},
+                content=landing.encode("utf-8"),
+                url="https://journal.example/article",
+            ),
+            "https://journal.example/article.pdf": FakeResponse(
+                status_code=500,
+                headers={"content-type": "text/html"},
+                content=b"server error",
+                url="https://journal.example/article.pdf",
+            ),
+        }
+    )
+
+    result = summary_module.resolve_input(
+        "https://journal.example/article",
+        output_dir=tmp_path,
+        http_client_factory=lambda: client,
+    )
+
+    assert result["pdf_path"] is None
+    assert result["unresolved"]
+    assert "500" in result["unresolved"]
+
+
 def test_url_is_preferred_even_if_shadowed_by_local_file(
     summary_module, tmp_path: Path, monkeypatch
 ):

@@ -763,3 +763,77 @@ Path(args.report).write_text(REVIEWER, encoding="utf-8")
         assert "reviewer modified files" in str(exc)
     else:
         raise AssertionError("mutating reviewer in untracked dir was accepted")
+
+
+def test_reviewer_edits_existing_untracked_file_fails_workflow(tmp_path):
+    runner = load_runner()
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    init_git_repo(repo)
+
+    # Pre-existing untracked file at repo root
+    (repo / "scratch.txt").write_text("before", encoding="utf-8")
+
+    stub = tmp_path / "stub_cli.py"
+    write_stub_cli(stub)
+
+    mutating_reviewer = tmp_path / "mutating_reviewer.py"
+    mutating_reviewer.write_text('''from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
+REVIEWER = """Verdict: accept
+
+## Skills used
+- none
+
+## Critical
+- None.
+
+## Important
+- None.
+
+## Minor
+- None.
+
+## Validation gaps
+- None.
+
+## Decision points for user
+- None.
+"""
+
+parser = argparse.ArgumentParser()
+parser.add_argument("--report", required=True)
+parser.add_argument("--repo", required=True)
+args, _ = parser.parse_known_args()
+
+# Overwrite contents of an existing untracked file
+Path(args.repo, "scratch.txt").write_text("after\\n", encoding="utf-8")
+Path(args.report).write_text(REVIEWER, encoding="utf-8")
+''', encoding="utf-8")
+
+    try:
+        runner.run_workflow(
+            repo=repo,
+            task="Update a skill.",
+            target_paths=["skills/example-skill/SKILL.md"],
+            implementer_cmd=(
+                f"{sys.executable} {stub} --kind implementer --report {{report}} "
+                "--repo {repo} --workdir {workdir}"
+            ),
+            reviewer_cmd=(
+                f"{sys.executable} {mutating_reviewer} --report {{report}} "
+                "--repo {repo}"
+            ),
+            runs_dir=repo / ".skill-workflow-runs",
+            dry_run=False,
+            max_fix_cycles=2,
+        )
+    except runner.WorkflowError as exc:
+        assert "reviewer modified files" in str(exc)
+    else:
+        raise AssertionError(
+            "reviewer editing existing untracked file was accepted"
+        )

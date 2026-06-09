@@ -137,3 +137,25 @@ def test_summary_main_accepts_help(summary_module):
         summary_module.main(["--help"])
 
     assert exc_info.value.code == 0
+
+
+def test_summary_render_include_flags_are_mutually_exclusive(summary_module):
+    parser = summary_module.build_parser()
+    with pytest.raises(SystemExit) as exc_info:
+        parser.parse_args(
+            [
+                "render",
+                "--extract",
+                "extract.json",
+                "--content",
+                "content.json",
+                "--output-tex",
+                "out.tex",
+                "--include-table",
+                "Table 1",
+                "--include-figure",
+                "Figure 1",
+            ]
+        )
+
+    assert exc_info.value.code == 2

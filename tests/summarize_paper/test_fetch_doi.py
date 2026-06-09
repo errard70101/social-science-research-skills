@@ -144,3 +144,29 @@ def test_paywalled_doi_without_email_is_unresolved(
     assert result["pdf_path"] is None
     assert result["resolution_path"] == ["doi"]
     assert "UNPAYWALL_EMAIL" in result["unresolved"]
+
+
+def test_doi_http_error_is_unresolved(
+    summary_module, tmp_path: Path, monkeypatch
+):
+    monkeypatch.delenv("UNPAYWALL_EMAIL", raising=False)
+    client = FakeClient(
+        {
+            "https://doi.org/10.1234/missing": FakeResponse(
+                status_code=404,
+                headers={"content-type": "text/html"},
+                content=b"<html>not found</html>",
+                url="https://doi.org/10.1234/missing",
+            ),
+        }
+    )
+
+    result = summary_module.resolve_input(
+        "10.1234/missing",
+        output_dir=tmp_path,
+        http_client_factory=lambda: client,
+    )
+
+    assert result["pdf_path"] is None
+    assert result["resolution_path"] == ["doi"]
+    assert "404" in result["unresolved"]

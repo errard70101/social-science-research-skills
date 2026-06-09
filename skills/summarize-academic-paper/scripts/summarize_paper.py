@@ -155,6 +155,18 @@ def _resolve_url(
 
     with http_client_factory() as client:
         response = client.get(rewritten)
+        if response.status_code >= 400:
+            return {
+                "pdf_path": None,
+                "resolution_path": resolution_path,
+                "source_url": rewritten,
+                "retrieved_at": _utc_now_iso(),
+                "sha256": None,
+                "unresolved": (
+                    f"fetch failed with HTTP {response.status_code} for "
+                    f"{rewritten}"
+                ),
+            }
         if _is_pdf_response(response):
             saved = _save_pdf_bytes(output_dir, rewritten, response.content)
             return {
@@ -171,6 +183,19 @@ def _resolve_url(
         if meta_match:
             pdf_url = meta_match.group("url")
             pdf_response = client.get(pdf_url)
+            if pdf_response.status_code >= 400:
+                return {
+                    "pdf_path": None,
+                    "resolution_path": resolution_path
+                    + ["citation-pdf-meta"],
+                    "source_url": pdf_url,
+                    "retrieved_at": _utc_now_iso(),
+                    "sha256": None,
+                    "unresolved": (
+                        f"fetch failed with HTTP {pdf_response.status_code} "
+                        f"for {pdf_url}"
+                    ),
+                }
             if _is_pdf_response(pdf_response):
                 saved = _save_pdf_bytes(
                     output_dir, pdf_url, pdf_response.content
@@ -245,6 +270,18 @@ def _resolve_doi(
     doi_url = f"https://doi.org/{normalized}"
     with http_client_factory() as client:
         response = client.get(doi_url)
+        if response.status_code >= 400:
+            return {
+                "pdf_path": None,
+                "resolution_path": ["doi"],
+                "source_url": doi_url,
+                "retrieved_at": _utc_now_iso(),
+                "sha256": None,
+                "unresolved": (
+                    f"DOI resolution failed with HTTP "
+                    f"{response.status_code} for {doi_url}"
+                ),
+            }
         if _is_pdf_response(response):
             saved = _save_pdf_bytes(
                 output_dir, doi_url, response.content
@@ -940,8 +977,9 @@ def build_parser() -> argparse.ArgumentParser:
     render.add_argument("--extract", type=Path, required=True)
     render.add_argument("--content", type=Path, required=True)
     render.add_argument("--output-tex", type=Path, required=True)
-    render.add_argument("--include-table", default=None)
-    render.add_argument("--include-figure", default=None)
+    include_group = render.add_mutually_exclusive_group()
+    include_group.add_argument("--include-table", default=None)
+    include_group.add_argument("--include-figure", default=None)
     render.add_argument("--reproduce-tables", action="store_true")
     return parser
 

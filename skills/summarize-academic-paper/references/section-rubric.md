@@ -30,6 +30,24 @@ accuracy and intuition over hitting an exact word count.
   authors compare counties on either side of a redistricting boundary" beats
   "geographic regression discontinuity at the redistricting boundary."
 
+## LaTeX in Section Bodies
+
+Section bodies are inserted into the template verbatim, so they are
+LaTeX-as-typed. Use this freedom for citations and math, but escape any
+literal special characters that you mean as plain text:
+
+- Citations: write `{{authorYearFirstWord}}` for inline references; the
+  renderer expands these to `\citep{...}`. Raw `\cite{...}` calls are also
+  honored.
+- Math: wrap with `$...$` or `$$...$$` as usual.
+- Plain-text specials: escape `%` as `\%`, `&` as `\&`, `_` as `\_`,
+  `#` as `\#`, and `$` as `\$` when you mean a literal character (for
+  example, "10\% margin", "panel A\&B", "real\_gdp\_pc",
+  "covers \#1 and \#2", "\$2{,}500 incentive"). Leaving these unescaped
+  will break compilation.
+- The non-breaking space `~` is a deliberate typographic spacing command
+  (for example, in "p.~11") — leave it unescaped in that usage.
+
 ## Per-Section Notes
 
 ### In one sentence

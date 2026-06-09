@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -208,16 +209,29 @@ def git_snapshot(repo: Path, exclude: Path | None = None) -> str:
         capture_output=True,
         text=True,
     ).stdout
+    exclude_rel: str | None = None
     if exclude is not None:
         try:
-            rel = exclude.resolve().relative_to(repo.resolve()).as_posix()
-            lines = [
-                line for line in status.splitlines()
-                if not (line[3:] == rel or line[3:] == f'"{rel}"')
-            ]
-            status = "\n".join(lines) + ("\n" if lines else "")
+            exclude_rel = (
+                exclude.resolve().relative_to(repo.resolve()).as_posix()
+            )
         except ValueError:
-            pass
+            exclude_rel = None
+        if exclude_rel is not None:
+            quoted_prefix = f'"{exclude_rel}/'
+            unquoted_prefix = f"{exclude_rel}/"
+            lines = []
+            for line in status.splitlines():
+                path = line[3:]
+                if (
+                    path == exclude_rel
+                    or path == f'"{exclude_rel}"'
+                    or path.startswith(unquoted_prefix)
+                    or path.startswith(quoted_prefix)
+                ):
+                    continue
+                lines.append(line)
+            status = "\n".join(lines) + ("\n" if lines else "")
     diff = subprocess.run(
         ["git", "diff", "--no-ext-diff", "--binary"],
         cwd=repo,
@@ -225,7 +239,37 @@ def git_snapshot(repo: Path, exclude: Path | None = None) -> str:
         capture_output=True,
         text=True,
     ).stdout
-    return f"{status}\n---DIFF---\n{diff}"
+    untracked = subprocess.run(
+        [
+            "git",
+            "ls-files",
+            "--others",
+            "--exclude-standard",
+            "-z",
+        ],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout
+    untracked_hashes: list[str] = []
+    for path in untracked.split("\0"):
+        if not path:
+            continue
+        if exclude_rel is not None and (
+            path == exclude_rel or path.startswith(f"{exclude_rel}/")
+        ):
+            continue
+        try:
+            data = (repo / path).read_bytes()
+        except (FileNotFoundError, IsADirectoryError, PermissionError):
+            continue
+        digest = hashlib.sha256(data).hexdigest()
+        untracked_hashes.append(f"{digest} {path}")
+    untracked_block = "\n".join(sorted(untracked_hashes))
+    return (
+        f"{status}\n---DIFF---\n{diff}\n---UNTRACKED---\n{untracked_block}"
+    )
 
 
 def run_workflow(
@@ -319,7 +363,7 @@ def run_workflow(
             ),
             encoding="utf-8",
         )
-        before_review = git_snapshot(repo, exclude=review_report)
+        before_review = git_snapshot(repo, exclude=run_dir)
         run_command(
             expand_command(
                 reviewer_cmd,
@@ -331,7 +375,7 @@ def run_workflow(
             repo=repo,
             timeout=command_timeout,
         )
-        after_review = git_snapshot(repo, exclude=review_report)
+        after_review = git_snapshot(repo, exclude=run_dir)
         if after_review != before_review:
             raise WorkflowError("reviewer modified files")
         reviewer_report = read_required_report(review_report, kind="reviewer")
