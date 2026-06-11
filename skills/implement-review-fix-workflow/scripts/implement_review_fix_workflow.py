@@ -130,10 +130,9 @@ Target paths:
 Write your report to: {report_path}
 
 Required superpowers skills when applicable:
-- using-git
 - writing-plans
 - test-driven-development
-- debugging-systematically
+- systematic-debugging
 - verification-before-completion
 - writing-skills
 
@@ -152,8 +151,7 @@ Implementation report: {implementation_report}
 Write your report to: {report_path}
 
 Required superpowers skills when applicable:
-- code-reviewing
-- using-git
+- requesting-code-review
 - verification-before-completion
 
 Do not modify files. The runner will compare git snapshots before and after

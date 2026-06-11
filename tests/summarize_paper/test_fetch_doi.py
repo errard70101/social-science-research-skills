@@ -92,7 +92,10 @@ def test_paywalled_doi_falls_back_to_unpaywall(
                 content=b"<html>paywall</html>",
                 url="https://publisher.example/paywalled",
             ),
-            "https://api.unpaywall.org/v2/10.1234/paywalled?email=user%40example.org": FakeResponse(
+            (
+                "https://api.unpaywall.org/v2/10.1234/paywalled"
+                "?email=user%40example.org"
+            ): FakeResponse(
                 status_code=200,
                 headers={"content-type": "application/json"},
                 content=unpaywall_json.encode("utf-8"),

@@ -135,9 +135,12 @@ def test_render_escapes_special_characters_in_paper_metadata(
     )
 
     text = output_tex.read_text(encoding="utf-8")
+    escaped_text = (
+        r"50\% of \$x\$ \#1\_2 \{draft\} "
+        r"\textbackslash{}\textbackslash{} \textasciitilde{} \textasciicircum{}"
+    )
     assert (
-        r"50\% of \$x\$ \#1\_2 \{draft\} \textbackslash{}\textbackslash{} \textasciitilde{} \textasciicircum{}"
-        in text
+        escaped_text in text
     )
     assert r"R\&D\_\{Lab\} 100\%" in text
     assert r"B and C\textbackslash{}\textbackslash{}D (2001)" in text

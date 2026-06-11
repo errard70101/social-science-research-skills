@@ -17,14 +17,14 @@ This skill provides two primary capabilities: Searching for papers and Fetching 
 To search for papers by topic or author:
 
 ```bash
-conda run -n benchmark python "$SKILL_DIR/scripts/search_repec.py" "your search query" --limit 10
+python "$SKILL_DIR/scripts/search_repec.py" "your search query" --limit 10
 ```
 
 **Option B: Fetch latest articles from a specific journal**
 Provide the RePEc journal/series handle using `--journal-handle` without a query:
 
 ```bash
-conda run -n benchmark python "$SKILL_DIR/scripts/search_repec.py" --journal-handle "RePEc:ucp:jpolec" --limit 5
+python "$SKILL_DIR/scripts/search_repec.py" --journal-handle "RePEc:ucp:jpolec" --limit 5
 ```
 
 The search script outputs a JSON array containing paper titles and links to the IDEAS page.
@@ -35,7 +35,7 @@ Once you have identified a specific paper, you can extract its RePEc Handle from
 Use the CitEc API to get its citation count to evaluate its impact:
 
 ```bash
-conda run -n benchmark python "$SKILL_DIR/scripts/get_citations.py" "RePEc:nbr:nberwo:35310"
+python "$SKILL_DIR/scripts/get_citations.py" "RePEc:nbr:nberwo:35310"
 ```
 
 The script will return a JSON object with `cited_by_count` (how many papers cite this one) and `cites_count` (how many references this paper has).
@@ -53,7 +53,7 @@ python -m pip install httpx beautifulsoup4
 
 - **When renaming PDFs (`rename-and-organize-references`)**: If you need to accurately identify a poorly named economics paper, use this skill to fetch the correct Author, Year, and Title first.
 - **When updating LaTeX (`manage-latex-bibliography`)**: If you need to find the correct citation or BibTeX metadata for an economics paper, use this skill to find the IDEAS page, from which authoritative metadata can be extracted.
-- **When Snowballing**: If you need to perform massive citation network traversal, use this skill to precisely locate the target paper first, then pass its title/ID to `literature-search-openalex` for unlimited snowballing.
+- **When Snowballing**: If you need to perform massive citation network traversal, use this skill to precisely locate the target paper first, then pass its title/ID to an available citation-network skill such as `literature-search-openalex` when that skill is installed.
 
 ## Use Cases
 - Finding the most recent working papers (e.g., NBER, CEPR, IZA).

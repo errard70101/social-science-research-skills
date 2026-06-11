@@ -9,10 +9,9 @@ pretending it was used.
 
 Required skills when applicable:
 
-- `using-git`
 - `writing-plans`
 - `test-driven-development`
-- `debugging-systematically`
+- `systematic-debugging`
 - `verification-before-completion`
 - `writing-skills`
 
@@ -32,7 +31,7 @@ Verdict: implemented
 - Updated the requested files.
 
 ## Validation
-- Command: python -m pytest tests/skill_development_workflow/test_runner.py -q
+- Command: python -m pytest tests/implement_review_fix_workflow/test_runner.py -q
   Result: pass
   Notes: Focused workflow tests passed.
 
@@ -40,7 +39,7 @@ Verdict: implemented
 - None.
 
 ## Files changed
-- skills/skill-development-workflow/SKILL.md
+- skills/implement-review-fix-workflow/SKILL.md
 ```
 
 Allowed implementer verdicts: `implemented`, `blocked`, `no changes needed`.
@@ -55,8 +54,7 @@ used.
 
 Required skills when applicable:
 
-- `code-reviewing`
-- `using-git`
+- `requesting-code-review`
 - `verification-before-completion`
 
 Write the report to the exact path provided by the runner. The report must use
@@ -66,7 +64,7 @@ this format:
 Verdict: accept
 
 ## Skills used
-- code-reviewing: Used for findings-first review posture.
+- requesting-code-review: Used for findings-first review posture.
 
 ## Critical
 - None.

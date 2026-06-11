@@ -661,9 +661,8 @@ def validate_content(content: dict[str, Any]) -> None:
         raise ValueError(
             f"content.headline_visual.kind must be one of {VALID_VISUAL_KINDS}"
         )
-    if kind == "image":
-        if not visual.get("label"):
-            raise ValueError("content.headline_visual.label required for image mode")
+    if kind == "image" and not visual.get("label"):
+        raise ValueError("content.headline_visual.label required for image mode")
     if kind == "table" and not visual.get("latex_table"):
         raise ValueError("content.headline_visual.latex_table required for table mode")
     predecessors = content.get("predecessor_citations", [])

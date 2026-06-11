@@ -25,6 +25,10 @@ SKILLS = {
         "scripts/implement_review_fix_workflow.py",
         "references/prompt-contracts.md",
     ],
+    "literature-search-repec": [
+        "scripts/search_repec.py",
+        "scripts/get_citations.py",
+    ],
 }
 
 
@@ -78,3 +82,9 @@ def test_bibliography_skill_does_not_bundle_aea_style():
     skill = ROOT / "skills" / "manage-latex-bibliography"
 
     assert not list(skill.rglob("aea.bst"))
+
+
+def test_repec_runtime_dependency_is_packaged():
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+
+    assert '"beautifulsoup4' in pyproject

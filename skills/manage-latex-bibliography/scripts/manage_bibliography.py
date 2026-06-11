@@ -910,7 +910,10 @@ def validate_entry(
                     f"{label} source {idx} requires a retrieved_at timestamp"
                 )
             try:
-                dt = datetime.fromisoformat(retrieved_at)
+                normalized = retrieved_at.removesuffix("Z") + "+00:00"
+                if not retrieved_at.endswith("Z"):
+                    normalized = retrieved_at
+                dt = datetime.fromisoformat(normalized)
                 if dt.tzinfo is None:
                     raise ValueError("missing timezone")
             except Exception as err:

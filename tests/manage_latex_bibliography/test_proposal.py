@@ -615,3 +615,25 @@ def test_validate_accepts_valid_timestamps(bibliography_module, tmp_path, timest
 
     # Should not raise
     bibliography_module.validate_proposal(proposal)
+
+
+def test_validate_accepts_z_timestamp_on_python310_parser(
+    bibliography_module, tmp_path, monkeypatch
+):
+    real_datetime = bibliography_module.datetime
+
+    class Python310DateTime:
+        @staticmethod
+        def fromisoformat(value):
+            if value.endswith("Z"):
+                raise ValueError("Invalid isoformat string")
+            return real_datetime.fromisoformat(value)
+
+    project, _ = write_project(tmp_path, "\\documentclass{article}\n")
+    proposal = bibliography_module.build_scan_proposal(project)
+    entry = accepted_entry()
+    entry["sources"][0]["retrieved_at"] = "2024-01-01T10:00:00Z"
+    proposal["new_entries"] = [entry]
+    monkeypatch.setattr(bibliography_module, "datetime", Python310DateTime)
+
+    bibliography_module.validate_proposal(proposal)

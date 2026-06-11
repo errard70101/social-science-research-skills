@@ -29,7 +29,7 @@ def valid_reviewer_report(verdict: str = "accept") -> str:
     return f"""Verdict: {verdict}
 
 ## Skills used
-- code-reviewing: Used for review.
+- requesting-code-review: Used for review.
 
 ## Critical
 - None.
@@ -135,7 +135,7 @@ def test_dry_run_writes_prompts_without_invoking_commands(tmp_path):
     )
     assert "writing-skills" in implementer_prompt
     assert "verification-before-completion" in implementer_prompt
-    assert "code-reviewing" in reviewer_prompt
+    assert "requesting-code-review" in reviewer_prompt
     assert "## Skills used" in reviewer_prompt
 
 
@@ -196,7 +196,7 @@ IMPLEMENTER = """Verdict: implemented
 REVIEWER = """Verdict: accept
 
 ## Skills used
-- code-reviewing: Used for review.
+- requesting-code-review: Used for review.
 
 ## Critical
 - None.
@@ -365,7 +365,7 @@ from pathlib import Path
 REVIEWER = """Verdict: accept
 
 ## Skills used
-- code-reviewing: Used for review.
+- requesting-code-review: Used for review.
 
 ## Critical
 - None.
@@ -452,7 +452,9 @@ log.write_text(previous + args.kind + "\\n", encoding="utf-8")
 report = Path(args.report)
 
 if args.kind == "implementer":
-    Path(args.repo, "generated.txt").write_text(previous + "implemented\\n", encoding="utf-8")
+    Path(args.repo, "generated.txt").write_text(
+        previous + "implemented\\n", encoding="utf-8"
+    )
     report.write_text("""Verdict: implemented
 
 ## Skills used
@@ -493,7 +495,7 @@ minor = "- Improve wording." if mode == "minor-only" else "- None."
 report.write_text(f"""Verdict: {{verdict}}
 
 ## Skills used
-- code-reviewing: Used for review.
+- requesting-code-review: Used for review.
 
 ## Critical
 - None.
