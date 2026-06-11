@@ -48,9 +48,7 @@ def test_propose_marks_missing_metadata_unresolved(
     source.write_bytes(b"fake-pdf")
     monkeypatch.setattr(rename_module, "read_pdf_candidate", lambda path: {})
 
-    mapping = rename_module.propose(
-        tmp_path, tmp_path / "proposal.json", provider=None
-    )
+    mapping = rename_module.propose(tmp_path, tmp_path / "proposal.json", provider=None)
 
     assert mapping["items"] == []
     assert len(mapping["unresolved"]) == 1
@@ -111,14 +109,11 @@ def test_propose_groups_related_material_with_longest_matching_main_stem(
         rename_module, "read_pdf_candidate", lambda path: metadata[path.name]
     )
 
-    mapping = rename_module.propose(
-        tmp_path, tmp_path / "proposal.json", provider=None
-    )
+    mapping = rename_module.propose(tmp_path, tmp_path / "proposal.json", provider=None)
 
     destinations = {item["source"]: item["destination"] for item in mapping["items"]}
     assert (
-        destinations["study_v2_appendix.pdf"]
-        == "Kim_2024_Revised_Study_Appendix.pdf"
+        destinations["study_v2_appendix.pdf"] == "Kim_2024_Revised_Study_Appendix.pdf"
     )
 
 
@@ -213,9 +208,7 @@ def test_complete_local_metadata_proposes_offline_at_review_confidence(
         },
     )
 
-    mapping = rename_module.propose(
-        tmp_path, tmp_path / "proposal.json", provider=None
-    )
+    mapping = rename_module.propose(tmp_path, tmp_path / "proposal.json", provider=None)
 
     assert mapping["items"][0]["destination"] == "Lee_2024_Local_Evidence.pdf"
     assert mapping["items"][0]["confidence"] == "review"
@@ -277,9 +270,7 @@ def test_incomplete_local_metadata_stays_unresolved_offline(
         },
     )
 
-    mapping = rename_module.propose(
-        tmp_path, tmp_path / "proposal.json", provider=None
-    )
+    mapping = rename_module.propose(tmp_path, tmp_path / "proposal.json", provider=None)
 
     assert mapping["items"] == []
     assert mapping["unresolved"][0]["source"] == "local.pdf"
@@ -473,9 +464,7 @@ def test_openalex_leaves_ambiguous_compound_author_unresolved(rename_module):
 
     metadata = rename_module.OpenAlexProvider()._metadata(work)
 
-    assert metadata["authors"] == [
-        {"display_name": "Ada van Lee", "family_name": ""}
-    ]
+    assert metadata["authors"] == [{"display_name": "Ada van Lee", "family_name": ""}]
     assert metadata["metadata_quality"] == "unresolved-author-names"
     assert metadata["requires_review"] is True
 

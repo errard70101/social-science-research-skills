@@ -37,21 +37,15 @@ def test_fetch_writes_versioned_artifact(summary_module, tmp_path: Path):
     pdf = tmp_path / "paper.pdf"
     pdf.write_bytes(b"%PDF-1.4 stub")
 
-    artifact = summary_module.fetch(
-        input_value=str(pdf), output_dir=tmp_path / "work"
-    )
+    artifact = summary_module.fetch(input_value=str(pdf), output_dir=tmp_path / "work")
 
     assert artifact["schema_version"] == 1
     assert artifact["input"] == str(pdf)
-    payload = json.loads(
-        (tmp_path / "work" / "summarize-paper-fetch.json").read_text()
-    )
+    payload = json.loads((tmp_path / "work" / "summarize-paper-fetch.json").read_text())
     assert payload == artifact
 
 
-def test_url_download_does_not_clobber_existing_file(
-    summary_module, tmp_path: Path
-):
+def test_url_download_does_not_clobber_existing_file(summary_module, tmp_path: Path):
     existing = tmp_path / "paper.pdf"
     existing.write_bytes(b"original")
     pdf_bytes = b"%PDF-1.4 fresh"
@@ -79,9 +73,7 @@ def test_url_download_does_not_clobber_existing_file(
     assert existing.read_bytes() == b"original"
 
 
-def test_fetch_cli_command_writes_artifact(
-    summary_module, tmp_path: Path
-):
+def test_fetch_cli_command_writes_artifact(summary_module, tmp_path: Path):
     pdf = tmp_path / "paper.pdf"
     pdf.write_bytes(b"%PDF-1.4 stub")
     work = tmp_path / "work"

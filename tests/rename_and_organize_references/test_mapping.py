@@ -22,9 +22,7 @@ def item(source, destination, *, kind="main-paper", confidence="high"):
     }
 
 
-def test_contained_path_rejects_absolute_empty_and_dot_paths(
-    rename_module, tmp_path
-):
+def test_contained_path_rejects_absolute_empty_and_dot_paths(rename_module, tmp_path):
     assert rename_module.contained_path(tmp_path, str(tmp_path / "paper.pdf")) is None
     assert rename_module.contained_path(tmp_path, "") is None
     assert rename_module.contained_path(tmp_path, ".") is None
@@ -110,9 +108,7 @@ def test_validate_refuses_unresolved_or_review_confidence(rename_module, tmp_pat
     assert any("confidence" in error for error in errors)
 
 
-def test_validate_rejects_destination_that_is_another_source(
-    rename_module, tmp_path
-):
+def test_validate_rejects_destination_that_is_another_source(rename_module, tmp_path):
     (tmp_path / "one.pdf").touch()
     (tmp_path / "two.pdf").touch()
     data = mapping(
@@ -179,9 +175,7 @@ def test_validate_accumulates_schema_and_item_errors(rename_module, tmp_path):
     assert any("must differ" in error for error in errors)
 
 
-def test_validate_cli_reports_errors_and_success(
-    rename_module, tmp_path, capsys
-):
+def test_validate_cli_reports_errors_and_success(rename_module, tmp_path, capsys):
     source = tmp_path / "paper.pdf"
     source.touch()
     mapping_path = tmp_path / "mapping.json"

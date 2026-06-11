@@ -1,16 +1,18 @@
 import argparse
-import httpx
-from bs4 import BeautifulSoup
 import json
 import sys
 
+import httpx
+from bs4 import BeautifulSoup
+
+
 def search_ideas_repec(query, limit=10):
-    url = f"https://ideas.repec.org/cgi-bin/htsearch2"
+    url = "https://ideas.repec.org/cgi-bin/htsearch2"
     data = {"q": query}
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
     }
-    
+
     try:
         response = httpx.post(url, data=data, headers=headers, timeout=30.0)
         response.raise_for_status()
@@ -20,28 +22,35 @@ def search_ideas_repec(query, limit=10):
 
     soup = BeautifulSoup(response.text, "html.parser")
     results = []
-    
+
     # Typically, IDEAS search results are in <ol> -> <li>
     ol = soup.find("ol")
     if not ol:
-        print(json.dumps({"results": [], "message": "No results found or unrecognized HTML structure."}))
+        print(
+            json.dumps(
+                {
+                    "results": [],
+                    "message": "No results found or unrecognized HTML structure.",
+                }
+            )
+        )
         return
-        
+
     for li in ol.find_all("li", recursive=False):
         if len(results) >= limit:
             break
-            
+
         a_tag = li.find("a")
         if not a_tag:
             continue
-            
+
         title = a_tag.get_text(strip=True)
         href = a_tag.get("href", "")
         link = "https://ideas.repec.org" + href if href.startswith("/") else href
-        
+
         # Extract authors - usually in <i> tags
         authors = [i.get_text(strip=True) for i in li.find_all("i")]
-        
+
         # Extract abstract/snippet if available
         # The text snippet is often mixed in the li string elements
         snippet = ""
@@ -51,16 +60,17 @@ def search_ideas_repec(query, limit=10):
             if text not in title and text not in authors and len(text) > 30:
                 snippet = text
                 break
-                
+
         result_item = {
             "title": title,
             "link": link,
             "authors": authors,
-            "snippet": snippet
+            "snippet": snippet,
         }
         results.append(result_item)
-        
+
     print(json.dumps({"results": results}, indent=2, ensure_ascii=False))
+
 
 def fetch_latest_journal_articles(handle, limit=10):
     # handle format: RePEc:ucp:jpolec
@@ -69,7 +79,13 @@ def fetch_latest_journal_articles(handle, limit=10):
         provider = parts[1]
         journal = parts[2]
     else:
-        print(json.dumps({"error": "Invalid journal handle format. Expected RePEc:provider:journal"}))
+        print(
+            json.dumps(
+                {
+                    "error": "Invalid journal handle format. Expected RePEc:provider:journal"
+                }
+            )
+        )
         return
 
     url = f"https://ideas.repec.org/s/{provider}/{journal}.html"
@@ -85,48 +101,65 @@ def fetch_latest_journal_articles(handle, limit=10):
 
     soup = BeautifulSoup(response.text, "html.parser")
     results = []
-    
+
     list_group = soup.find("ul", class_="list-group")
     if not list_group:
-        print(json.dumps({"results": [], "message": "No articles found or unrecognized structure."}))
+        print(
+            json.dumps(
+                {
+                    "results": [],
+                    "message": "No articles found or unrecognized structure.",
+                }
+            )
+        )
         return
-        
+
     for li in list_group.find_all("li"):
         if len(results) >= limit:
             break
-            
+
         a_tag = li.find("a")
         if not a_tag:
             continue
-            
+
         href = a_tag.get("href", "")
         if "/a/" not in href and "/p/" not in href:
             continue
-            
+
         title = a_tag.get_text(strip=True)
         link = "https://ideas.repec.org" + href if href.startswith("/") else href
-        
-        result_item = {
-            "title": title,
-            "link": link
-        }
+
+        result_item = {"title": title, "link": link}
         results.append(result_item)
-        
+
     print(json.dumps({"results": results}, indent=2, ensure_ascii=False))
+
 
 def main():
     parser = argparse.ArgumentParser(description="Search IDEAS RePEc database")
-    parser.add_argument("query", nargs="?", default="", help="Search query (optional if using --journal-handle)")
-    parser.add_argument("--limit", type=int, default=10, help="Maximum number of results to return")
-    parser.add_argument("--journal-handle", help="RePEc journal/series handle (e.g., RePEc:ucp:jpolec)")
+    parser.add_argument(
+        "query",
+        nargs="?",
+        default="",
+        help="Search query (optional if using --journal-handle)",
+    )
+    parser.add_argument(
+        "--limit", type=int, default=10, help="Maximum number of results to return"
+    )
+    parser.add_argument(
+        "--journal-handle", help="RePEc journal/series handle (e.g., RePEc:ucp:jpolec)"
+    )
     args = parser.parse_args()
-    
+
     if args.journal_handle and not args.query:
         fetch_latest_journal_articles(args.journal_handle, args.limit)
     elif args.query:
         search_ideas_repec(args.query, args.limit)
     else:
-        print(json.dumps({"error": "Must provide either a query or a --journal-handle"}))
+        print(
+            json.dumps({"error": "Must provide either a query or a --journal-handle"})
+        )
+
 
 if __name__ == "__main__":
     main()

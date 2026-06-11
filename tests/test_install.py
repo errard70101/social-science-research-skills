@@ -10,9 +10,7 @@ def make_skill(root, name="example-skill"):
     return skill
 
 
-def test_resolve_targets_deduplicates_shared_agents_directory(
-    install_module, tmp_path
-):
+def test_resolve_targets_deduplicates_shared_agents_directory(install_module, tmp_path):
     home = tmp_path / "home"
 
     destinations = install_module.resolve_destinations(

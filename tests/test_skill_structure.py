@@ -21,8 +21,8 @@ SKILLS = {
         "references/section-rubric.md",
         "references/input-sources.md",
     ],
-    "skill-development-workflow": [
-        "scripts/skill_development_workflow.py",
+    "implement-review-fix-workflow": [
+        "scripts/implement_review_fix_workflow.py",
         "references/prompt-contracts.md",
     ],
 }

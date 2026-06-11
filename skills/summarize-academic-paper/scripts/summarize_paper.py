@@ -28,9 +28,7 @@ CITATION_PDF_META = re.compile(
     r"[^>]*\bcontent=[\"'](?P<url>[^\"']+)[\"']",
     re.IGNORECASE,
 )
-DOI_PATTERN = re.compile(
-    r"^(?:doi:)?(10\.\d{4,9}/[-._;()/:A-Z0-9]+)$", re.IGNORECASE
-)
+DOI_PATTERN = re.compile(r"^(?:doi:)?(10\.\d{4,9}/[-._;()/:A-Z0-9]+)$", re.IGNORECASE)
 CAPTION_PATTERN = re.compile(
     r"^(?P<prefix>Appendix\s+)?"
     r"(?P<kind>Table|Figure|Fig\.?|Panel)\s+"
@@ -54,9 +52,7 @@ def _strip_empty_cites(text: str) -> str:
 
 def _utc_now_iso() -> str:
     return (
-        datetime.now(timezone.utc)
-        .isoformat(timespec="seconds")
-        .replace("+00:00", "Z")
+        datetime.now(timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
     )
 
 
@@ -124,21 +120,14 @@ def _rewrite_known_url(url: str) -> tuple[str, str | None]:
 
 def _is_pdf_response(response) -> bool:
     return (
-        response.headers.get("content-type", "")
-        .split(";", 1)[0]
-        .strip()
-        .lower()
+        response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
         == "application/pdf"
     )
 
 
-def _save_pdf_bytes(
-    output_dir: Path, source_url: str, content: bytes
-) -> Path:
+def _save_pdf_bytes(output_dir: Path, source_url: str, content: bytes) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
-    destination = _unique_path(
-        output_dir, _safe_filename_from_url(source_url)
-    )
+    destination = _unique_path(output_dir, _safe_filename_from_url(source_url))
     destination.write_bytes(content)
     return destination
 
@@ -163,8 +152,7 @@ def _resolve_url(
                 "retrieved_at": _utc_now_iso(),
                 "sha256": None,
                 "unresolved": (
-                    f"fetch failed with HTTP {response.status_code} for "
-                    f"{rewritten}"
+                    f"fetch failed with HTTP {response.status_code} for " f"{rewritten}"
                 ),
             }
         if _is_pdf_response(response):
@@ -186,8 +174,7 @@ def _resolve_url(
             if pdf_response.status_code >= 400:
                 return {
                     "pdf_path": None,
-                    "resolution_path": resolution_path
-                    + ["citation-pdf-meta"],
+                    "resolution_path": resolution_path + ["citation-pdf-meta"],
                     "source_url": pdf_url,
                     "retrieved_at": _utc_now_iso(),
                     "sha256": None,
@@ -197,13 +184,10 @@ def _resolve_url(
                     ),
                 }
             if _is_pdf_response(pdf_response):
-                saved = _save_pdf_bytes(
-                    output_dir, pdf_url, pdf_response.content
-                )
+                saved = _save_pdf_bytes(output_dir, pdf_url, pdf_response.content)
                 return {
                     "pdf_path": str(saved.resolve()),
-                    "resolution_path": resolution_path
-                    + ["citation-pdf-meta"],
+                    "resolution_path": resolution_path + ["citation-pdf-meta"],
                     "source_url": pdf_url,
                     "retrieved_at": _utc_now_iso(),
                     "sha256": _sha256_bytes(pdf_response.content),
@@ -233,16 +217,12 @@ def _normalize_doi(value: str) -> str:
     return match.group(1).lower()
 
 
-def _resolve_via_unpaywall(
-    doi: str, client, output_dir: Path
-) -> dict[str, Any] | None:
+def _resolve_via_unpaywall(doi: str, client, output_dir: Path) -> dict[str, Any] | None:
     email = os.environ.get("UNPAYWALL_EMAIL")
     if not email:
         return None
     encoded_email = urllib.parse.quote(email)
-    response = client.get(
-        f"https://api.unpaywall.org/v2/{doi}?email={encoded_email}"
-    )
+    response = client.get(f"https://api.unpaywall.org/v2/{doi}?email={encoded_email}")
     if response.status_code >= 400:
         return None
     payload = response.json()
@@ -283,9 +263,7 @@ def _resolve_doi(
                 ),
             }
         if _is_pdf_response(response):
-            saved = _save_pdf_bytes(
-                output_dir, doi_url, response.content
-            )
+            saved = _save_pdf_bytes(output_dir, doi_url, response.content)
             return {
                 "pdf_path": str(saved.resolve()),
                 "resolution_path": ["doi"],
@@ -385,7 +363,9 @@ def _extract_pages(reader) -> list[dict[str, Any]]:
     for index, page in enumerate(reader.pages, start=1):
         try:
             text = page.extract_text() or ""
-        except Exception:  # noqa: BLE001 - pypdf raises varied errors per page; keep going
+        except (
+            Exception
+        ):  # noqa: BLE001 - pypdf raises varied errors per page; keep going
             text = ""
         pages.append({"page": index, "text": text})
     return pages
@@ -425,7 +405,20 @@ def guess_title(first_page_text: str) -> str | None:
 
 
 LOWERCASE_PARTICLES = {
-    "de", "da", "di", "do", "del", "della", "du", "von", "van", "der", "den", "le", "la", "al"
+    "de",
+    "da",
+    "di",
+    "do",
+    "del",
+    "della",
+    "du",
+    "von",
+    "van",
+    "der",
+    "den",
+    "le",
+    "la",
+    "al",
 }
 
 
@@ -436,7 +429,7 @@ def _clean_author_block(block: str) -> str:
     cleaned_parts = []
     for part in parts:
         # Strip trailing superscript characters: digits, *, †, ‡, §, ¶
-        cleaned = re.sub(r'[\d*†‡§¶]+$', '', part).strip()
+        cleaned = re.sub(r"[\d*†‡§¶]+$", "", part).strip()
         if cleaned:
             cleaned_parts.append(cleaned)
     return " and ".join(cleaned_parts)
@@ -498,11 +491,11 @@ def collect_caption_candidates(
             if not match:
                 i += 1
                 continue
-            
+
             prefix = match.group("prefix") or ""
             kind_str = match.group("kind").lower()
             number = match.group("number")
-            
+
             # Normalize kind
             if kind_str.startswith("fig"):
                 normalized_kind = "figure"
@@ -519,9 +512,9 @@ def collect_caption_candidates(
                 label = f"{prefix.strip().capitalize()} {display_kind} {number}"
             else:
                 label = f"{display_kind} {number}"
-                
+
             caption = match.group("caption").strip()
-            
+
             # Lookahead for continuation lines
             k = 1
             while i + k < num_lines and k <= 3:
@@ -530,19 +523,17 @@ def collect_caption_candidates(
                     break
                 if CAPTION_PATTERN.match(next_line):
                     break
-                
+
                 is_continuation = False
-                if not caption.endswith((".", "!", "?")):
+                if not caption.endswith((".", "!", "?")) or next_line[0].islower():
                     is_continuation = True
-                elif next_line[0].islower():
-                    is_continuation = True
-                
+
                 if is_continuation:
                     caption = f"{caption} {next_line}"
                     k += 1
                 else:
                     break
-            
+
             candidates.append(
                 {
                     "label": label,
@@ -590,9 +581,7 @@ def extract(
         "warnings": warnings,
     }
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(
-        json.dumps(artifact, indent=2) + "\n", encoding="utf-8"
-    )
+    output_path.write_text(json.dumps(artifact, indent=2) + "\n", encoding="utf-8")
     return artifact
 
 
@@ -639,9 +628,7 @@ def _rubric_warnings(content: dict[str, Any]) -> list[str]:
         low_threshold = int(low * (1 - RUBRIC_TOLERANCE))
         high_threshold = int(high * (1 + RUBRIC_TOLERANCE))
         if words < low_threshold or words > high_threshold:
-            warnings.append(
-                f"{section} has {words} words; rubric band is {low}-{high}"
-            )
+            warnings.append(f"{section} has {words} words; rubric band is {low}-{high}")
     return warnings
 
 
@@ -657,9 +644,7 @@ def validate_content(content: dict[str, Any]) -> None:
         if not paper.get(field) and paper.get(field) != 0
     ]
     if missing_paper_fields:
-        raise ValueError(
-            f"content.paper missing fields: {missing_paper_fields}"
-        )
+        raise ValueError(f"content.paper missing fields: {missing_paper_fields}")
     if not isinstance(paper["authors"], list) or not paper["authors"]:
         raise ValueError("content.paper.authors must be a non-empty list")
     for section in CONTENT_REQUIRED_SECTIONS:
@@ -678,13 +663,9 @@ def validate_content(content: dict[str, Any]) -> None:
         )
     if kind == "image":
         if not visual.get("label"):
-            raise ValueError(
-                "content.headline_visual.label required for image mode"
-            )
+            raise ValueError("content.headline_visual.label required for image mode")
     if kind == "table" and not visual.get("latex_table"):
-        raise ValueError(
-            "content.headline_visual.latex_table required for table mode"
-        )
+        raise ValueError("content.headline_visual.latex_table required for table mode")
     predecessors = content.get("predecessor_citations", [])
     if not isinstance(predecessors, list):
         raise ValueError("content.predecessor_citations must be a list")
@@ -696,7 +677,20 @@ def validate_content(content: dict[str, Any]) -> None:
 
 
 SURNAME_PARTICLES = {
-    "de", "da", "di", "do", "del", "della", "du", "von", "van", "der", "den", "le", "la", "al"
+    "de",
+    "da",
+    "di",
+    "do",
+    "del",
+    "della",
+    "du",
+    "von",
+    "van",
+    "der",
+    "den",
+    "le",
+    "la",
+    "al",
 }
 
 
@@ -714,7 +708,6 @@ def _surname(author: str) -> str:
         else:
             break
     return " ".join(surname_parts)
-
 
 
 def format_author_string(authors: list[str]) -> str:
@@ -747,15 +740,11 @@ def _slug_label(label: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", label.lower()).strip("-")
 
 
-def _ensure_candidate(
-    label: str, candidates: list[dict[str, Any]]
-) -> dict[str, Any]:
+def _ensure_candidate(label: str, candidates: list[dict[str, Any]]) -> dict[str, Any]:
     for candidate in candidates:
         if candidate["label"].lower() == label.lower():
             return candidate
-    raise ValueError(
-        f"requested headline visual {label!r} not in extract candidates"
-    )
+    raise ValueError(f"requested headline visual {label!r} not in extract candidates")
 
 
 def _save_visual_image(
@@ -801,9 +790,7 @@ def _build_visual_block(
                     f"candidate page ({candidate_page}) for label {label!r}"
                 )
         page_number = candidate_page
-        image_path = _save_visual_image(
-            pdf_path, page_number, asset_dir, label
-        )
+        image_path = _save_visual_image(pdf_path, page_number, asset_dir, label)
         relative = f"{asset_relative_dir}/{image_path.name}"
         return (
             "\\begin{figure}[ht]\n"
@@ -816,9 +803,7 @@ def _build_visual_block(
         )
     if kind == "table":
         notes = visual.get("notes") or []
-        notes_block = "\n".join(
-            f"      \\item {note}" for note in notes
-        )
+        notes_block = "\n".join(f"      \\item {note}" for note in notes)
         return (
             "\\begin{table}[ht]\n"
             "  \\centering\n"
@@ -830,9 +815,7 @@ def _build_visual_block(
             "  \\end{threeparttable}\n"
             "\\end{table}\n"
         )
-    raise NotImplementedError(
-        f"headline_visual.kind = {kind!r} not yet implemented"
-    )
+    raise NotImplementedError(f"headline_visual.kind = {kind!r} not yet implemented")
 
 
 def _load_template() -> str:
@@ -905,9 +888,7 @@ def render(
 ) -> dict[str, Any]:
     content = json.loads(content_path.read_text(encoding="utf-8"))
     validate_content(content)
-    extract_artifact = json.loads(
-        extract_path.read_text(encoding="utf-8")
-    )
+    extract_artifact = json.loads(extract_path.read_text(encoding="utf-8"))
     pdf_path = Path(extract_artifact["pdf_path"])
     visual = content["headline_visual"]
     if visual["kind"] == "image":
@@ -925,8 +906,7 @@ def render(
             )
     if visual["kind"] == "table" and not reproduce_tables:
         raise ValueError(
-            "headline_visual.kind is 'table' but --reproduce-tables "
-            "was not supplied"
+            "headline_visual.kind is 'table' but --reproduce-tables " "was not supplied"
         )
     summary_stem = output_tex.stem
     asset_dir = output_tex.parent / summary_stem / "figures"

@@ -5,14 +5,13 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
 RUNNER_PATH = (
     ROOT
     / "skills"
-    / "skill-development-workflow"
+    / "implement-review-fix-workflow"
     / "scripts"
-    / "skill_development_workflow.py"
+    / "implement_review_fix_workflow.py"
 )
 
 
@@ -62,7 +61,7 @@ def valid_implementer_report(verdict: str = "implemented") -> str:
 - Updated files.
 
 ## Validation
-- Command: python -m pytest tests/skill_development_workflow/test_runner.py -q
+- Command: python -m pytest tests/implement_review_fix_workflow/test_runner.py -q
   Result: pass
   Notes: Tests passed.
 
@@ -70,7 +69,7 @@ def valid_implementer_report(verdict: str = "implemented") -> str:
 - None.
 
 ## Files changed
-- skills/skill-development-workflow/SKILL.md
+- skills/implement-review-fix-workflow/SKILL.md
 """
 
 
@@ -141,7 +140,9 @@ def test_dry_run_writes_prompts_without_invoking_commands(tmp_path):
 
 
 def init_git_repo(repo: Path) -> None:
-    subprocess.run(["git", "init"], cwd=repo, check=True, capture_output=True, text=True)
+    subprocess.run(
+        ["git", "init"], cwd=repo, check=True, capture_output=True, text=True
+    )
     subprocess.run(
         ["git", "config", "user.email", "test@example.com"],
         cwd=repo,
@@ -181,7 +182,7 @@ IMPLEMENTER = """Verdict: implemented
 - Updated files.
 
 ## Validation
-- Command: python -m pytest tests/skill_development_workflow/test_runner.py -q
+- Command: python -m pytest tests/implement_review_fix_workflow/test_runner.py -q
   Result: pass
   Notes: Stub validation passed.
 
@@ -279,9 +280,7 @@ def test_command_timeout_fails_workflow(tmp_path):
             repo=repo,
             task="Update a skill.",
             target_paths=["skills/example-skill/SKILL.md"],
-            implementer_cmd=(
-                f"{sys.executable} -c \"import time; time.sleep(1)\""
-            ),
+            implementer_cmd=(f'{sys.executable} -c "import time; time.sleep(1)"'),
             reviewer_cmd=(
                 f"{sys.executable} {stub} --kind reviewer --report {{report}} "
                 "--repo {repo} --workdir {workdir}"
@@ -312,7 +311,7 @@ def test_command_nonzero_exit_fails_workflow(tmp_path):
             repo=repo,
             task="Update a skill.",
             target_paths=["skills/example-skill/SKILL.md"],
-            implementer_cmd=f"{sys.executable} -c \"raise SystemExit(7)\"",
+            implementer_cmd=f'{sys.executable} -c "raise SystemExit(7)"',
             reviewer_cmd=(
                 f"{sys.executable} {stub} --kind reviewer --report {{report}} "
                 "--repo {repo} --workdir {workdir}"
@@ -340,7 +339,7 @@ def test_missing_report_fails_workflow(tmp_path):
             repo=repo,
             task="Update a skill.",
             target_paths=["skills/example-skill/SKILL.md"],
-            implementer_cmd=f"{sys.executable} -c \"raise SystemExit(0)\"",
+            implementer_cmd=f'{sys.executable} -c "raise SystemExit(0)"',
             reviewer_cmd=(
                 f"{sys.executable} {stub} --kind reviewer --report {{report}} "
                 "--repo {repo} --workdir {workdir}"
@@ -466,7 +465,7 @@ if args.kind == "implementer":
 - Updated files.
 
 ## Validation
-- Command: python -m pytest tests/skill_development_workflow/test_runner.py -q
+- Command: python -m pytest tests/implement_review_fix_workflow/test_runner.py -q
   Result: pass
   Notes: Stub validation passed.
 
@@ -641,7 +640,8 @@ def test_implementer_blocked_stops_workflow(tmp_path):
     repo.mkdir()
     init_git_repo(repo)
     stub = tmp_path / "blocked_stub.py"
-    stub.write_text('''
+    stub.write_text(
+        '''
 import argparse
 from pathlib import Path
 
@@ -669,15 +669,15 @@ parser = argparse.ArgumentParser()
 parser.add_argument("--report", required=True)
 args, _ = parser.parse_known_args()
 Path(args.report).write_text(IMPLEMENTER, encoding="utf-8")
-''', encoding="utf-8")
+''',
+        encoding="utf-8",
+    )
 
     result = runner.run_workflow(
         repo=repo,
         task="Update a skill.",
         target_paths=["skills/example-skill/SKILL.md"],
-        implementer_cmd=(
-            f"{sys.executable} {stub} --report {{report}}"
-        ),
+        implementer_cmd=(f"{sys.executable} {stub} --report {{report}}"),
         reviewer_cmd=(
             f"{sys.executable} -c 'raise SystemExit(\"Reviewer should not run\")'"
         ),
@@ -701,12 +701,13 @@ def test_reviewer_modifies_untracked_dir_fails_workflow(tmp_path):
     untracked_dir = repo / "untracked"
     untracked_dir.mkdir()
     (untracked_dir / "existing.txt").write_text("existing", encoding="utf-8")
-    
+
     stub = tmp_path / "stub_cli.py"
     write_stub_cli(stub)
 
     mutating_reviewer = tmp_path / "mutating_reviewer.py"
-    mutating_reviewer.write_text('''from __future__ import annotations
+    mutating_reviewer.write_text(
+        '''from __future__ import annotations
 
 import argparse
 from pathlib import Path
@@ -740,7 +741,9 @@ args, _ = parser.parse_known_args()
 # Modify inside untracked dir by creating a new file
 Path(args.repo, "untracked", "new.txt").write_text("changed\\n", encoding="utf-8")
 Path(args.report).write_text(REVIEWER, encoding="utf-8")
-''', encoding="utf-8")
+''',
+        encoding="utf-8",
+    )
 
     try:
         runner.run_workflow(
@@ -778,7 +781,8 @@ def test_reviewer_edits_existing_untracked_file_fails_workflow(tmp_path):
     write_stub_cli(stub)
 
     mutating_reviewer = tmp_path / "mutating_reviewer.py"
-    mutating_reviewer.write_text('''from __future__ import annotations
+    mutating_reviewer.write_text(
+        '''from __future__ import annotations
 
 import argparse
 from pathlib import Path
@@ -812,7 +816,9 @@ args, _ = parser.parse_known_args()
 # Overwrite contents of an existing untracked file
 Path(args.repo, "scratch.txt").write_text("after\\n", encoding="utf-8")
 Path(args.report).write_text(REVIEWER, encoding="utf-8")
-''', encoding="utf-8")
+''',
+        encoding="utf-8",
+    )
 
     try:
         runner.run_workflow(
@@ -834,6 +840,4 @@ Path(args.report).write_text(REVIEWER, encoding="utf-8")
     except runner.WorkflowError as exc:
         assert "reviewer modified files" in str(exc)
     else:
-        raise AssertionError(
-            "reviewer editing existing untracked file was accepted"
-        )
+        raise AssertionError("reviewer editing existing untracked file was accepted")

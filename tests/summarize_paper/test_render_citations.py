@@ -70,9 +70,7 @@ def test_inline_citation_placeholders_become_cite_commands(
     assert "{{north1990institutions}}" not in text
 
 
-def test_empty_predecessor_list_emits_no_cite(
-    summary_module, tmp_path: Path
-):
+def test_empty_predecessor_list_emits_no_cite(summary_module, tmp_path: Path):
     content = _base_content()
     content["placement_in_literature"] = (
         "Sits between earlier descriptive work and later experimental "
@@ -105,4 +103,3 @@ def test_surname_handling_with_particles(summary_module):
     assert summary_module._surname("Jonathan de Quidt") == "de Quidt"
     assert summary_module._surname("John Doe") == "Doe"
     assert summary_module._surname("de Quidt, Jonathan") == "de Quidt"
-

@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-from dataclasses import dataclass
-from datetime import datetime
-from pathlib import Path
 import re
 import shlex
 import subprocess
-
+from dataclasses import dataclass
+from datetime import datetime
+from pathlib import Path
 
 IMPLEMENTER_VERDICTS = {"implemented", "blocked", "no changes needed"}
 REVIEWER_VERDICTS = {"accept", "request changes", "reject"}
@@ -46,7 +45,9 @@ class Report:
 
     def has_items(self, section: str) -> bool:
         body = self.sections.get(section, "")
-        items = [line.strip() for line in body.splitlines() if line.strip().startswith("-")]
+        items = [
+            line.strip() for line in body.splitlines() if line.strip().startswith("-")
+        ]
         return any(item not in {"- None.", "- None"} for item in items)
 
 
@@ -109,7 +110,11 @@ def create_run_dir(runs_dir: Path, task: str) -> Path:
 
 
 def render_implementer_prompt(
-    *, task: str, target_paths: list[str], report_path: Path, fix_report: Path | None = None
+    *,
+    task: str,
+    target_paths: list[str],
+    report_path: Path,
+    fix_report: Path | None = None,
 ) -> str:
     targets = "\n".join(f"- {path}" for path in target_paths)
     fix_context = ""
@@ -212,9 +217,7 @@ def git_snapshot(repo: Path, exclude: Path | None = None) -> str:
     exclude_rel: str | None = None
     if exclude is not None:
         try:
-            exclude_rel = (
-                exclude.resolve().relative_to(repo.resolve()).as_posix()
-            )
+            exclude_rel = exclude.resolve().relative_to(repo.resolve()).as_posix()
         except ValueError:
             exclude_rel = None
         if exclude_rel is not None:
@@ -267,9 +270,7 @@ def git_snapshot(repo: Path, exclude: Path | None = None) -> str:
         digest = hashlib.sha256(data).hexdigest()
         untracked_hashes.append(f"{digest} {path}")
     untracked_block = "\n".join(sorted(untracked_hashes))
-    return (
-        f"{status}\n---DIFF---\n{diff}\n---UNTRACKED---\n{untracked_block}"
-    )
+    return f"{status}\n---DIFF---\n{diff}\n---UNTRACKED---\n{untracked_block}"
 
 
 def run_workflow(
@@ -344,7 +345,9 @@ def run_workflow(
             repo=repo,
             timeout=command_timeout,
         )
-        implementer_report = read_required_report(implementation_report, kind="implementer")
+        implementer_report = read_required_report(
+            implementation_report, kind="implementer"
+        )
         implementation_reports.append(implementation_report)
 
         if implementer_report.verdict == "blocked":
@@ -398,10 +401,13 @@ def run_workflow(
 
 def write_final_report(result: WorkflowResult) -> Path:
     path = result.run_dir / "workflow-final-report.md"
-    implementation_reports = "\n".join(
-        f"- {report}" for report in result.implementation_reports
-    ) or "- None."
-    review_reports = "\n".join(f"- {report}" for report in result.review_reports) or "- None."
+    implementation_reports = (
+        "\n".join(f"- {report}" for report in result.implementation_reports)
+        or "- None."
+    )
+    review_reports = (
+        "\n".join(f"- {report}" for report in result.review_reports) or "- None."
+    )
     path.write_text(
         f"""Verdict: {result.verdict}
 

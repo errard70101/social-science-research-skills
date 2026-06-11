@@ -377,9 +377,7 @@ def propose(
     for candidate in entries:
         if classify_related(candidate) is None:
             continue
-        matching_mains = [
-            main for main in main_papers if related_to(main, candidate)
-        ]
+        matching_mains = [main for main in main_papers if related_to(main, candidate)]
         if matching_mains:
             related_owners[candidate] = max(
                 matching_mains,
@@ -560,13 +558,9 @@ def validate_mapping(data: Mapping[str, Any]) -> list[str]:
 
     for _, item, _, destination in valid_items:
         if destination in sources:
-            errors.append(
-                f"destination is another source: {item.get('destination')}"
-            )
+            errors.append(f"destination is another source: {item.get('destination')}")
         elif destination.exists():
-            errors.append(
-                f"destination already exists: {item.get('destination')}"
-            )
+            errors.append(f"destination already exists: {item.get('destination')}")
 
     for _, item, source, _ in valid_items:
         if not source.is_dir():

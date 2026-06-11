@@ -17,8 +17,8 @@ class FakeResponse:
         self.status_code = status_code
         self.headers = headers or {}
         self.content = content
-        self.text = text if text is not None else content.decode(
-            "utf-8", errors="replace"
+        self.text = (
+            text if text is not None else content.decode("utf-8", errors="replace")
         )
         self.url = url
 
@@ -48,9 +48,7 @@ class FakeClient:
         return None
 
 
-def test_doi_resolves_to_open_access_pdf(
-    summary_module, tmp_path: Path, monkeypatch
-):
+def test_doi_resolves_to_open_access_pdf(summary_module, tmp_path: Path, monkeypatch):
     pdf_bytes = b"%PDF-1.4 doi stub"
     client = FakeClient(
         {
@@ -146,9 +144,7 @@ def test_paywalled_doi_without_email_is_unresolved(
     assert "UNPAYWALL_EMAIL" in result["unresolved"]
 
 
-def test_doi_http_error_is_unresolved(
-    summary_module, tmp_path: Path, monkeypatch
-):
+def test_doi_http_error_is_unresolved(summary_module, tmp_path: Path, monkeypatch):
     monkeypatch.delenv("UNPAYWALL_EMAIL", raising=False)
     client = FakeClient(
         {

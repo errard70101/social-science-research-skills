@@ -71,9 +71,7 @@ def test_text_only_pages_emit_no_warning(summary_module, tmp_path: Path):
 
 def test_missing_author_block_emits_warning(summary_module, tmp_path: Path):
     fetch_path = _make_fetch_artifact(tmp_path)
-    reader = FakeReader(
-        pages=["A Single Long Title With No Recognizable Author Block"]
-    )
+    reader = FakeReader(pages=["A Single Long Title With No Recognizable Author Block"])
 
     artifact = summary_module.extract(
         fetch_path,

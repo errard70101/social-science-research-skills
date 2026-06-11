@@ -8,9 +8,7 @@ def test_resolve_local_pdf_records_provenance(summary_module, tmp_path: Path):
     pdf = tmp_path / "paper.pdf"
     pdf.write_bytes(b"%PDF-1.4 stub content")
 
-    result = summary_module.resolve_input(
-        str(pdf), output_dir=tmp_path / "work"
-    )
+    result = summary_module.resolve_input(str(pdf), output_dir=tmp_path / "work")
 
     assert result["pdf_path"] == str(pdf.resolve())
     assert result["resolution_path"] == ["local"]
@@ -21,9 +19,7 @@ def test_resolve_local_pdf_records_provenance(summary_module, tmp_path: Path):
     assert "retrieved_at" in result
 
 
-def test_fetch_writes_artifact_for_local_input(
-    summary_module, tmp_path: Path
-):
+def test_fetch_writes_artifact_for_local_input(summary_module, tmp_path: Path):
     pdf = tmp_path / "paper.pdf"
     pdf.write_bytes(b"%PDF-1.4 stub content")
     work = tmp_path / "work"

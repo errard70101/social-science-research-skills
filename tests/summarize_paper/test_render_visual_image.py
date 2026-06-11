@@ -60,9 +60,7 @@ def _content_for_image(label: str = "Table 3", page: int = 11) -> dict:
     }
 
 
-def test_image_mode_writes_png_and_block(
-    summary_module, tmp_path: Path, monkeypatch
-):
+def test_image_mode_writes_png_and_block(summary_module, tmp_path: Path, monkeypatch):
     pdf = tmp_path / "paper.pdf"
     pdf.write_bytes(b"%PDF-1.4 stub")
     extract_path = _make_extract_with_candidate(tmp_path)
@@ -93,9 +91,7 @@ def test_image_mode_writes_png_and_block(
     text = output_tex.read_text(encoding="utf-8")
     assert "\\begin{figure}" in text
     assert "\\includegraphics" in text
-    assert (
-        "Authors_2001_Title_Summary/figures/table-3.png" in text
-    )
+    assert "Authors_2001_Title_Summary/figures/table-3.png" in text
     assert "Source: Table 3" in text
 
 
@@ -106,9 +102,7 @@ def test_image_mode_label_must_match_candidate(
     pdf.write_bytes(b"%PDF-1.4 stub")
     extract_path = _make_extract_with_candidate(tmp_path)
     content_path = tmp_path / "content.json"
-    content_path.write_text(
-        json.dumps(_content_for_image(label="Table 9"))
-    )
+    content_path.write_text(json.dumps(_content_for_image(label="Table 9")))
     output_tex = tmp_path / "summary.tex"
 
     monkeypatch.setattr(
@@ -162,9 +156,7 @@ def test_image_mode_rejects_inconsistent_manual_page(
     pdf.write_bytes(b"%PDF-1.4 stub")
     extract_path = _make_extract_with_candidate(tmp_path, label="Table 3", page=11)
     content_path = tmp_path / "content.json"
-    content_path.write_text(
-        json.dumps(_content_for_image(label="Table 3", page=999))
-    )
+    content_path.write_text(json.dumps(_content_for_image(label="Table 3", page=999)))
     output_tex = tmp_path / "summary.tex"
 
     monkeypatch.setattr(

@@ -47,8 +47,7 @@ def test_caption_regex_ignores_inline_references(summary_module):
         {
             "page": 1,
             "text": (
-                "We refer to Table 1 throughout. "
-                "Figure 1 illustrates the design."
+                "We refer to Table 1 throughout. " "Figure 1 illustrates the design."
             ),
         }
     ]
@@ -65,17 +64,17 @@ def test_collect_caption_candidates_expanded_prefixes_and_multiline(summary_modu
                 "Fig. 1: Multi-line figure caption\n"
                 "that continues here.\n"
                 "Unrelated text starts here."
-            )
+            ),
         },
         {
             "page": 3,
             "text": (
                 "Appendix Table A.2: Summary of results.\n"
                 "Panel B — Specific details."
-            )
-        }
+            ),
+        },
     ]
-    
+
     candidates = summary_module.collect_caption_candidates(pages)
     assert candidates == [
         {
@@ -95,6 +94,5 @@ def test_collect_caption_candidates_expanded_prefixes_and_multiline(summary_modu
             "caption": "Specific details.",
             "page": 3,
             "kind": "panel",
-        }
+        },
     ]
-

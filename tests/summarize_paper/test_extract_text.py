@@ -29,9 +29,7 @@ def make_reader_factory(reader: FakeReader):
     return factory
 
 
-def test_extract_records_per_page_text(
-    summary_module, tmp_path: Path
-):
+def test_extract_records_per_page_text(summary_module, tmp_path: Path):
     pdf = tmp_path / "paper.pdf"
     pdf.write_bytes(b"%PDF-1.4 stub")
     fetch_artifact = {

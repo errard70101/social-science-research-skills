@@ -86,13 +86,11 @@ def test_arxiv_abs_url_is_rewritten_to_pdf(summary_module, tmp_path: Path):
     assert Path(result["pdf_path"]).read_bytes() == pdf_bytes
 
 
-def test_html_landing_page_uses_citation_pdf_url_meta(
-    summary_module, tmp_path: Path
-):
+def test_html_landing_page_uses_citation_pdf_url_meta(summary_module, tmp_path: Path):
     landing = (
         "<html><head>"
-        "<meta name=\"citation_pdf_url\" "
-        "content=\"https://journal.example/article.pdf\">"
+        '<meta name="citation_pdf_url" '
+        'content="https://journal.example/article.pdf">'
         "</head><body></body></html>"
     )
     pdf_bytes = b"%PDF-1.4 journal stub"
@@ -131,8 +129,8 @@ def test_citation_pdf_url_meta_handles_flipped_attribute_order(
 ):
     landing = (
         "<html><head>"
-        "<meta content=\"https://journal.example/article.pdf\" "
-        "name=\"citation_pdf_url\">"
+        '<meta content="https://journal.example/article.pdf" '
+        'name="citation_pdf_url">'
         "</head><body></body></html>"
     )
     pdf_bytes = b"%PDF-1.4 journal stub"
@@ -280,7 +278,9 @@ def test_url_is_preferred_even_if_shadowed_by_local_file(
     assert Path(result["pdf_path"]).read_bytes() == pdf_bytes
 
 
-def test_url_with_query_params_uses_path_portion_for_filename(summary_module, tmp_path: Path):
+def test_url_with_query_params_uses_path_portion_for_filename(
+    summary_module, tmp_path: Path
+):
     pdf_bytes = b"%PDF-1.4 stub"
     client = FakeClient(
         {
@@ -303,5 +303,3 @@ def test_url_with_query_params_uses_path_portion_for_filename(summary_module, tm
     assert saved.name == "paper.pdf"
     assert saved.exists()
     assert saved.read_bytes() == pdf_bytes
-
-

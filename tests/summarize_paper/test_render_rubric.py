@@ -31,9 +31,7 @@ def _content(setup_words: int) -> dict:
             "venue": "AER",
             "citation_key": "acemoglu2001colonial",
         },
-        "one_sentence": (
-            "Institutions shape long-run income via colonial origins."
-        ),
+        "one_sentence": ("Institutions shape long-run income via colonial origins."),
         "setup": "word " * setup_words,
         "empirical_strategy": (
             "We instrument current institutions with settler mortality "
@@ -53,9 +51,7 @@ def _content(setup_words: int) -> dict:
     }
 
 
-def test_rubric_warning_when_setup_too_short(
-    summary_module, tmp_path: Path
-):
+def test_rubric_warning_when_setup_too_short(summary_module, tmp_path: Path):
     content_path = tmp_path / "content.json"
     content_path.write_text(json.dumps(_content(setup_words=10)))
     output_tex = tmp_path / "summary.tex"
@@ -69,9 +65,7 @@ def test_rubric_warning_when_setup_too_short(
     assert any("setup" in warning for warning in result["warnings"])
 
 
-def test_no_rubric_warning_when_in_band(
-    summary_module, tmp_path: Path
-):
+def test_no_rubric_warning_when_in_band(summary_module, tmp_path: Path):
     content_path = tmp_path / "content.json"
     content_path.write_text(json.dumps(_content(setup_words=80)))
     output_tex = tmp_path / "summary.tex"

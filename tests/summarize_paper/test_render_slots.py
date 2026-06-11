@@ -45,25 +45,33 @@ def _make_extract(tmp_path: Path) -> Path:
 
 
 def test_format_author_string_uses_oxford_comma(summary_module):
-    assert summary_module.format_author_string([
-        "Acemoglu, Daron",
-        "Johnson, Simon",
-        "Robinson, James",
-    ]) == "Acemoglu, Johnson, and Robinson"
+    assert (
+        summary_module.format_author_string(
+            [
+                "Acemoglu, Daron",
+                "Johnson, Simon",
+                "Robinson, James",
+            ]
+        )
+        == "Acemoglu, Johnson, and Robinson"
+    )
 
 
 def test_format_author_string_uses_et_al_for_four_or_more(summary_module):
-    assert summary_module.format_author_string([
-        "Acemoglu, Daron",
-        "Johnson, Simon",
-        "Robinson, James",
-        "Smith, Jane",
-    ]) == "Acemoglu et al."
+    assert (
+        summary_module.format_author_string(
+            [
+                "Acemoglu, Daron",
+                "Johnson, Simon",
+                "Robinson, James",
+                "Smith, Jane",
+            ]
+        )
+        == "Acemoglu et al."
+    )
 
 
-def test_render_writes_tex_with_substituted_slots(
-    summary_module, tmp_path: Path
-):
+def test_render_writes_tex_with_substituted_slots(summary_module, tmp_path: Path):
     extract_path = _make_extract(tmp_path)
     content_path = tmp_path / "content.json"
     content_path.write_text(json.dumps(_valid_content()))
@@ -100,9 +108,7 @@ def test_render_is_atomic(summary_module, tmp_path: Path):
     text = output_tex.read_text(encoding="utf-8")
     assert text.startswith("\\documentclass")
     assert "PRE-EXISTING" not in text
-    siblings = [
-        name for name in tmp_path.iterdir() if name.suffix == ".tmp"
-    ]
+    siblings = [name for name in tmp_path.iterdir() if name.suffix == ".tmp"]
     assert siblings == []
 
 
@@ -129,6 +135,9 @@ def test_render_escapes_special_characters_in_paper_metadata(
     )
 
     text = output_tex.read_text(encoding="utf-8")
-    assert r"50\% of \$x\$ \#1\_2 \{draft\} \textbackslash{}\textbackslash{} \textasciitilde{} \textasciicircum{}" in text
+    assert (
+        r"50\% of \$x\$ \#1\_2 \{draft\} \textbackslash{}\textbackslash{} \textasciitilde{} \textasciicircum{}"
+        in text
+    )
     assert r"R\&D\_\{Lab\} 100\%" in text
     assert r"B and C\textbackslash{}\textbackslash{}D (2001)" in text

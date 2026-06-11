@@ -60,9 +60,7 @@ def _table_content() -> dict:
     }
 
 
-def test_reconstructed_table_renders_threeparttable(
-    summary_module, tmp_path: Path
-):
+def test_reconstructed_table_renders_threeparttable(summary_module, tmp_path: Path):
     pdf = tmp_path / "paper.pdf"
     pdf.write_bytes(b"%PDF-1.4 stub")
     content_path = tmp_path / "content.json"
@@ -84,9 +82,7 @@ def test_reconstructed_table_renders_threeparttable(
     assert "Sample: 64 ex-colonies" in text
 
 
-def test_reconstructed_table_requires_flag(
-    summary_module, tmp_path: Path
-):
+def test_reconstructed_table_requires_flag(summary_module, tmp_path: Path):
     pdf = tmp_path / "paper.pdf"
     pdf.write_bytes(b"%PDF-1.4 stub")
     content_path = tmp_path / "content.json"
@@ -104,9 +100,7 @@ def test_reconstructed_table_requires_flag(
     assert "reproduce-tables" in str(exc.value)
 
 
-def test_reconstructed_table_requires_latex(
-    summary_module, tmp_path: Path
-):
+def test_reconstructed_table_requires_latex(summary_module, tmp_path: Path):
     pdf = tmp_path / "paper.pdf"
     pdf.write_bytes(b"%PDF-1.4 stub")
     content = _table_content()

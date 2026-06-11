@@ -48,9 +48,7 @@ def test_author_guess_falls_back_to_empty(summary_module):
 
 def test_author_guess_handles_lowercase_particles(summary_module):
     first_page = (
-        "Title\n"
-        "\n"
-        "Roy van der Weide, Jonathan de Quidt, and J. B. De Long\n"
+        "Title\n" "\n" "Roy van der Weide, Jonathan de Quidt, and J. B. De Long\n"
     )
     assert summary_module.guess_authors(first_page) == [
         "Roy van der Weide",
@@ -61,9 +59,7 @@ def test_author_guess_handles_lowercase_particles(summary_module):
 
 def test_author_guess_strips_trailing_superscript_markers(summary_module):
     first_page = (
-        "Title\n"
-        "\n"
-        "Daron Acemoglu1, Simon Johnson* and James A. Robinson\u2020\n"
+        "Title\n" "\n" "Daron Acemoglu1, Simon Johnson* and James A. Robinson\u2020\n"
     )
     assert summary_module.guess_authors(first_page) == [
         "Daron Acemoglu",
