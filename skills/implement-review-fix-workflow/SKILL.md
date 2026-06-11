@@ -1,9 +1,9 @@
 ---
-name: skill-development-workflow
+name: implement-review-fix-workflow
 description: Use when developing or maintaining repository skills, skill scripts, prompt contracts, references, or related tests through a dry-run-first implement-review-fix workflow.
 ---
 
-# Skill Development Workflow
+# Implement, Review, Fix Workflow
 
 ## Overview
 
@@ -28,7 +28,7 @@ methodology. OpenCode agents are optional interactive fallback only.
 Use the bundled runner through this skill directory:
 
 ```bash
-python "$SKILL_DIR/scripts/skill_development_workflow.py" --help
+python "$SKILL_DIR/scripts/implement_review_fix_workflow.py" --help
 ```
 
 For the first milestone, use dry-run or stub commands only.

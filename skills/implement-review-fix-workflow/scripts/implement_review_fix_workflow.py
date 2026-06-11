@@ -417,7 +417,7 @@ def write_final_report(result: WorkflowResult) -> Path:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run skill development workflow")
+    parser = argparse.ArgumentParser(description="Run implement-review-fix workflow")
     parser.add_argument("--repo", type=Path, required=True)
     parser.add_argument("--task", required=True)
     parser.add_argument("--target", action="append", dest="targets", required=True)
