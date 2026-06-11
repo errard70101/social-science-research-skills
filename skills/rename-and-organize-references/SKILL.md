@@ -54,7 +54,7 @@ more authors, use the first family name followed by `_et_al`.
 ## Safety Rules
 
 - Never run `apply` on an unreviewed proposal.
-- Never invent an author, publication year, or title.
+- Never invent an author, publication year, or title. You MUST use an available literature search skill (e.g., literature-search-repec or literature-search-openalex) to retrieve the ground truth if metadata is missing.
 - Treat unresolved metadata and title-search matches as review items.
 - Do not bypass collision, containment, or duplicate-operation failures.
 - Warn that renaming replication directories can break hard-coded paths inside

@@ -19,8 +19,7 @@ description: Use when a LaTeX project needs a new or updated BibTeX bibliography
 
 4. Review missing citation keys and inspect prose for likely uncited works.
    Never treat a citation key or prose mention as proof of publication identity.
-5. Research each candidate according to
-   `references/verification-rules.md`.
+5. Research each candidate according to `references/verification-rules.md`. You MUST use an available literature search skill (e.g., literature-search-repec or literature-search-openalex) to retrieve the ground truth metadata.
 6. Give each candidate and its evidence to an independent subagent for a fresh
    online check. If subagents are unavailable, perform a separate second lookup
    without relying on first-pass conclusions.

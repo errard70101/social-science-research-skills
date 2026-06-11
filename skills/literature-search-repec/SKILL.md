@@ -43,11 +43,17 @@ The script will return a JSON object with `cited_by_count` (how many papers cite
 
 ## Dependencies
 
-Use Python 3.10 or newer. Install the required libraries in your environment:
+Use Python 3.10 or newer. It requires `httpx` and `beautifulsoup4`.
 
 ```bash
-conda run -n benchmark python -m pip install "httpx>=0.27" "beautifulsoup4>=4.12"
+python -m pip install httpx beautifulsoup4
 ```
+
+## Synergy with other skills (AI Operating Guidelines)
+
+- **When renaming PDFs (`rename-and-organize-references`)**: If you need to accurately identify a poorly named economics paper, use this skill to fetch the correct Author, Year, and Title first.
+- **When updating LaTeX (`manage-latex-bibliography`)**: If you need to find the correct citation or BibTeX metadata for an economics paper, use this skill to find the IDEAS page, from which authoritative metadata can be extracted.
+- **When Snowballing**: If you need to perform massive citation network traversal, use this skill to precisely locate the target paper first, then pass its title/ID to `literature-search-openalex` for unlimited snowballing.
 
 ## Use Cases
 - Finding the most recent working papers (e.g., NBER, CEPR, IZA).
