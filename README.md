@@ -114,12 +114,4 @@ Add each canonical skill under `skills/<skill-name>/`. The directory name must
 match the `name` in `SKILL.md`. Keep bundled paths relative and avoid
 client-specific or machine-specific assumptions.
 
-## Roadmap
 
-The following skills are planned for future development:
-
-### 1. `generate-bib-references`
-Generates bibliography files complying with specific academic standards.
-- **Goal**: Create a `.bib` file incorporating the `aea.bst` format.
-- **Rules**: All entries must follow headline capitalization style.
-- **Verification**: Uses a dedicated subagent to cross-check and verify reference correctness by searching the web.
