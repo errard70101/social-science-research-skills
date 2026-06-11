@@ -62,13 +62,71 @@ def search_ideas_repec(query, limit=10):
         
     print(json.dumps({"results": results}, indent=2, ensure_ascii=False))
 
+def fetch_latest_journal_articles(handle, limit=10):
+    # handle format: RePEc:ucp:jpolec
+    parts = handle.split(":")
+    if len(parts) >= 3:
+        provider = parts[1]
+        journal = parts[2]
+    else:
+        print(json.dumps({"error": "Invalid journal handle format. Expected RePEc:provider:journal"}))
+        return
+
+    url = f"https://ideas.repec.org/s/{provider}/{journal}.html"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+    }
+    try:
+        response = httpx.get(url, headers=headers, timeout=30.0)
+        response.raise_for_status()
+    except httpx.RequestError as e:
+        print(json.dumps({"error": f"Request failed: {str(e)}"}))
+        sys.exit(1)
+
+    soup = BeautifulSoup(response.text, "html.parser")
+    results = []
+    
+    list_group = soup.find("ul", class_="list-group")
+    if not list_group:
+        print(json.dumps({"results": [], "message": "No articles found or unrecognized structure."}))
+        return
+        
+    for li in list_group.find_all("li"):
+        if len(results) >= limit:
+            break
+            
+        a_tag = li.find("a")
+        if not a_tag:
+            continue
+            
+        href = a_tag.get("href", "")
+        if "/a/" not in href and "/p/" not in href:
+            continue
+            
+        title = a_tag.get_text(strip=True)
+        link = "https://ideas.repec.org" + href if href.startswith("/") else href
+        
+        result_item = {
+            "title": title,
+            "link": link
+        }
+        results.append(result_item)
+        
+    print(json.dumps({"results": results}, indent=2, ensure_ascii=False))
+
 def main():
     parser = argparse.ArgumentParser(description="Search IDEAS RePEc database")
-    parser.add_argument("query", help="Search query")
+    parser.add_argument("query", nargs="?", default="", help="Search query (optional if using --journal-handle)")
     parser.add_argument("--limit", type=int, default=10, help="Maximum number of results to return")
+    parser.add_argument("--journal-handle", help="RePEc journal/series handle (e.g., RePEc:ucp:jpolec)")
     args = parser.parse_args()
     
-    search_ideas_repec(args.query, args.limit)
+    if args.journal_handle and not args.query:
+        fetch_latest_journal_articles(args.journal_handle, args.limit)
+    elif args.query:
+        search_ideas_repec(args.query, args.limit)
+    else:
+        print(json.dumps({"error": "Must provide either a query or a --journal-handle"}))
 
 if __name__ == "__main__":
     main()

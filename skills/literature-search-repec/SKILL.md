@@ -15,7 +15,14 @@ description: Search the RePEc (Research Papers in Economics) database via IDEAS.
    conda run -n benchmark python "$SKILL_DIR/scripts/search_repec.py" "your search query" --limit 10
    ```
 
-4. The script outputs a JSON array of search results, including paper titles, authors, and links to the IDEAS page.
+   **Option B: Fetch latest articles from a specific journal**
+   Provide the RePEc journal/series handle using `--journal-handle` without a query:
+
+   ```bash
+   conda run -n benchmark python "$SKILL_DIR/scripts/search_repec.py" --journal-handle "RePEc:ucp:jpolec" --limit 5
+   ```
+
+4. The script outputs a JSON array of search results, including paper titles and links to the IDEAS page.
 5. Review the results to extract the relevant papers. If needed, you can use the `read_url_content` tool on the resulting links to fetch the full paper metadata (abstract, JEL codes, download links) from the IDEAS website.
 
 ## Dependencies
