@@ -88,6 +88,20 @@ the helper downloads the current LaTeX template directly from the official AEA
 website and extracts the style into the user's project. Online metadata
 verification also requires network access.
 
+### `literature-search-repec`
+
+Searches the IDEAS/RePEc database for economics working papers and journal articles. It can perform keyword searches, fetch the latest articles from specific journal handles (e.g., JPE, NBER), and extract citation counts via the CitEc API to evaluate paper impact.
+
+Runtime dependencies:
+
+```bash
+python -m pip install httpx beautifulsoup4
+```
+
+### `implement-review-fix-workflow`
+
+An Agentic CI/CD engine that runs a non-interactive implementation and review loop. It coordinates a maker (implementer) and a checker (reviewer) to autonomously develop, refine, and verify repository skills or tasks until they pass review.
+
 ## Development
 
 ```bash
