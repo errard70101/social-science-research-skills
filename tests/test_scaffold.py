@@ -56,6 +56,10 @@ def test_bibliography_parser_has_exact_subcommands(bibliography_module):
             ["install-aea-style", "--project", "paper", "--confirm-download"],
             {"project": Path("paper"), "confirm_download": True},
         ),
+        (
+            ["audit", "--bib", "refs.bib", "--pdf-dir", "pdfs", "--output", "audit.json", "--all"],
+            {"bib": Path("refs.bib"), "pdf_dir": Path("pdfs"), "output": Path("audit.json"), "all": True},
+        ),
     ],
 )
 def test_bibliography_parser_accepts_required_arguments(
