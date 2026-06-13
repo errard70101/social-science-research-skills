@@ -771,7 +771,7 @@ def build_audit_proposal(bib_path: Path, pdf_dir: Path, strict_all: bool = False
         # Basic matching: check if citation key is in any PDF name
         found = False
         for pdf in pdf_files:
-            if key.lower() in pdf.lower():
+            if re.search(rf"(?:^|[^a-z0-9]){re.escape(key.lower())}(?:[^a-z0-9]|$)", pdf.lower()):
                 found = True
                 break
             # Fallback fuzzy match (Author_Year format)
@@ -779,8 +779,14 @@ def build_audit_proposal(bib_path: Path, pdf_dir: Path, strict_all: bool = False
             year = str(fields.get("year", ""))
             author_field = str(fields.get("author", ""))
             if year and author_field:
-                first_author = author_field.split(",")[0].split(" ")[-1]
-                if first_author.lower() in pdf.lower() and year in pdf:
+                # Isolate the first author properly
+                first_author_raw = re.split(r"(?i)\s+and\s+", author_field)[0].strip()
+                if "," in first_author_raw:
+                    first_author = first_author_raw.split(",")[0].strip()
+                else:
+                    first_author = first_author_raw.split(" ")[-1].strip()
+                    
+                if re.search(rf"(?:^|[^a-z0-9]){re.escape(first_author.lower())}(?:[^a-z0-9]|$)", pdf.lower()) and year in pdf:
                     found = True
                     break
                     

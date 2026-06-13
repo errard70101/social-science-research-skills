@@ -654,24 +654,39 @@ def test_build_audit_proposal(tmp_path: Path, bibliography_module):
         "  title={Another Test},\n"
         "  author={Doe, Jane},\n"
         "  year={2023}\n"
+        "}\n"
+        "@article{li20,\n"
+        "  title={Fuzzy Test},\n"
+        "  author={Li, Ming and Doe, John},\n"
+        "  year={2020}\n"
         "}",
         encoding="utf-8"
     )
 
     pdf_dir = tmp_path / "references"
     pdf_dir.mkdir()
-    # Create PDF for Smith but not for Doe
+    # Create PDF for Smith but not for Doe or li20
     (pdf_dir / "Smith_2024_Test_Title.pdf").touch()
+    
+    # Add a collision to test false positives
+    (pdf_dir / "Goldsmith_2023_Test.pdf").touch()
+    (pdf_dir / "poli2019.pdf").touch()
+    (pdf_dir / "Alibaba_2020_Title.pdf").touch()
 
     proposal = build_audit_proposal(bib_file, pdf_dir, strict_all=False)
     
     assert proposal["schema_version"] == 1
     assert proposal["target_bib"] == "references.bib"
-    assert len(proposal["unresolved"]) == 1
-    assert proposal["unresolved"][0]["source"] == "doe2023test"
-    assert proposal["unresolved"][0]["reason"] == "PDF not found or mismatch"
+    
+    # "smith2024test" is matched by Smith_2024_Test_Title.pdf
+    # "doe2023test" shouldn't match Goldsmith_2023_Test.pdf
+    # "li20" shouldn't match poli2019.pdf or Alibaba_2020_Title.pdf
+    assert len(proposal["unresolved"]) == 2
+    unresolved_sources = [u["source"] for u in proposal["unresolved"]]
+    assert "doe2023test" in unresolved_sources
+    assert "li20" in unresolved_sources
 
     # Test strict_all
     proposal_all = build_audit_proposal(bib_file, pdf_dir, strict_all=True)
-    assert len(proposal_all["unresolved"]) == 2
+    assert len(proposal_all["unresolved"]) == 3
 
