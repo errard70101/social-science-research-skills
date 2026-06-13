@@ -33,6 +33,7 @@ def test_bibliography_parser_has_exact_subcommands(bibliography_module):
         "validate",
         "apply",
         "install-aea-style",
+        "audit",
     }
 
 

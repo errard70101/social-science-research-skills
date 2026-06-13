@@ -1480,6 +1480,12 @@ def build_parser() -> argparse.ArgumentParser:
     install_parser.add_argument("--project", type=Path, required=True)
     install_parser.add_argument("--confirm-download", action="store_true")
 
+    audit_parser = subparsers.add_parser("audit")
+    audit_parser.add_argument("--bib", type=Path, required=True)
+    audit_parser.add_argument("--pdf-dir", type=Path, required=True)
+    audit_parser.add_argument("--output", type=Path, required=True)
+    audit_parser.add_argument("--all", action="store_true")
+
     return parser
 
 
