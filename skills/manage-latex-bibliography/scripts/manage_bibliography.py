@@ -1570,6 +1570,10 @@ def main(argv: list[str] | None = None) -> int:
         apply_proposal(proposal)
     elif args.command == "install-aea-style":
         install_aea_style(args.project)
+    elif args.command == "audit":
+        proposal = build_audit_proposal(args.bib, args.pdf_dir, strict_all=args.all)
+        args.output.write_text(json.dumps(proposal, indent=2), encoding="utf-8")
+        print(f"Audit proposal saved to {args.output}")
     return 0
 
 
