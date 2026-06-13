@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 from copy import deepcopy
+from pathlib import Path
 
 import pytest
 
@@ -637,3 +638,40 @@ def test_validate_accepts_z_timestamp_on_python310_parser(
     monkeypatch.setattr(bibliography_module, "datetime", Python310DateTime)
 
     bibliography_module.validate_proposal(proposal)
+
+
+def test_build_audit_proposal(tmp_path: Path, bibliography_module):
+    from manage_bibliography import build_audit_proposal
+
+    bib_file = tmp_path / "references.bib"
+    bib_file.write_text(
+        "@article{smith2024test,\n"
+        "  title={Test Title},\n"
+        "  author={Smith, John},\n"
+        "  year={2024}\n"
+        "}\n"
+        "@article{doe2023test,\n"
+        "  title={Another Test},\n"
+        "  author={Doe, Jane},\n"
+        "  year={2023}\n"
+        "}",
+        encoding="utf-8"
+    )
+
+    pdf_dir = tmp_path / "references"
+    pdf_dir.mkdir()
+    # Create PDF for Smith but not for Doe
+    (pdf_dir / "Smith_2024_Test_Title.pdf").touch()
+
+    proposal = build_audit_proposal(bib_file, pdf_dir, strict_all=False)
+    
+    assert proposal["schema_version"] == 1
+    assert proposal["target_bib"] == "references.bib"
+    assert len(proposal["unresolved"]) == 1
+    assert proposal["unresolved"][0]["source"] == "doe2023test"
+    assert proposal["unresolved"][0]["reason"] == "PDF not found or mismatch"
+
+    # Test strict_all
+    proposal_all = build_audit_proposal(bib_file, pdf_dir, strict_all=True)
+    assert len(proposal_all["unresolved"]) == 2
+

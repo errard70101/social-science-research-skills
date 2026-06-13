@@ -749,6 +749,63 @@ def _select_target(
     return target, warnings, tex_changes
 
 
+def build_audit_proposal(bib_path: Path, pdf_dir: Path, strict_all: bool = False) -> dict[str, object]:
+    content = ""
+    if bib_path.is_file():
+        content = bib_path.read_text(encoding="utf-8")
+    entries = parse_bibtex_entries(content)
+    
+    unresolved = []
+    
+    pdf_files = [f.name for f in pdf_dir.iterdir() if f.is_file() and f.suffix.lower() == ".pdf"] if pdf_dir.is_dir() else []
+
+    for entry in entries:
+        key = str(entry.get("key", ""))
+        if not key:
+            continue
+            
+        if strict_all:
+            unresolved.append({"source": key, "reason": "Strict initialization check"})
+            continue
+            
+        # Basic matching: check if citation key is in any PDF name
+        found = False
+        for pdf in pdf_files:
+            if key.lower() in pdf.lower():
+                found = True
+                break
+            # Fallback fuzzy match (Author_Year format)
+            fields = entry.get("fields", {})
+            year = str(fields.get("year", ""))
+            author_field = str(fields.get("author", ""))
+            if year and author_field:
+                first_author = author_field.split(",")[0].split(" ")[-1]
+                if first_author.lower() in pdf.lower() and year in pdf:
+                    found = True
+                    break
+                    
+        if not found:
+            unresolved.append({"source": key, "reason": "PDF not found or mismatch"})
+
+    return {
+        "schema_version": 1,
+        "project_root": str(bib_path.parent.absolute()),
+        "main_tex": "",
+        "target_bib": bib_path.name,
+        "file_digests": {
+            bib_path.name: hashlib.sha256(content.encode("utf-8")).hexdigest() if content else ""
+        },
+        "citations": [],
+        "tex_changes": [],
+        "new_entries": [],
+        "existing_entry_corrections": [],
+        "unresolved": unresolved,
+        "warnings": [],
+        "bibliography_system": "bibtex",
+        "verification_report": [],
+    }
+
+
 def build_scan_proposal(project: Path) -> dict[str, object]:
     root, main = select_main_tex(project)
     sources = discover_tex_files(main, root)
