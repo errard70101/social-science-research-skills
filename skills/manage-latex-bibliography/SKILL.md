@@ -23,13 +23,30 @@ description: Use when a LaTeX project needs a new or updated BibTeX bibliography
      --output /path/to/project/bibliography-proposal.json
    ```
 
-   **Mode 0 & 2 (Audit / Initialize):**
+   **Mode 0 (Initialize):**
    ```bash
    python "$SKILL_DIR/scripts/manage_bibliography.py" audit \
      --bib /path/to/project/references.bib \
      --pdf-dir /path/to/project/references \
      --output /path/to/project/bibliography-proposal.json \
-     [--all]  # Include --all for Mode 0 Initialize
+     --all
+   ```
+
+   **Mode 2 (Audit):**
+   ```bash
+   python "$SKILL_DIR/scripts/manage_bibliography.py" audit \
+     --bib /path/to/project/references.bib \
+     --pdf-dir /path/to/project/references \
+     --output /path/to/project/bibliography-proposal.json
+   ```
+
+   **Mode 3 (Update):**
+   ```bash
+   python "$SKILL_DIR/scripts/manage_bibliography.py" update-entry \
+     --proposal /path/to/project/bibliography-proposal.json \
+     --key <citation_key> \
+     --entry-type <type> \
+     --fields <json_fields_string>
    ```
 
 5. Review missing citation keys and inspect prose for likely uncited works.
