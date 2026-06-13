@@ -749,29 +749,41 @@ def _select_target(
     return target, warnings, tex_changes
 
 
-def build_audit_proposal(bib_path: Path, pdf_dir: Path, strict_all: bool = False) -> dict[str, object]:
+def build_audit_proposal(
+    bib_path: Path, pdf_dir: Path, strict_all: bool = False
+) -> dict[str, object]:
     content = ""
     if bib_path.is_file():
         content = bib_path.read_text(encoding="utf-8")
     entries = parse_bibtex_entries(content)
-    
+
     unresolved = []
-    
-    pdf_files = [f.name for f in pdf_dir.iterdir() if f.is_file() and f.suffix.lower() == ".pdf"] if pdf_dir.is_dir() else []
+
+    pdf_files = (
+        [
+            f.name
+            for f in pdf_dir.iterdir()
+            if f.is_file() and f.suffix.lower() == ".pdf"
+        ]
+        if pdf_dir.is_dir()
+        else []
+    )
 
     for entry in entries:
         key = str(entry.get("key", ""))
         if not key:
             continue
-            
+
         if strict_all:
             unresolved.append({"source": key, "reason": "Strict initialization check"})
             continue
-            
+
         # Basic matching: check if citation key is in any PDF name
         found = False
         for pdf in pdf_files:
-            if re.search(rf"(?:^|[^a-z0-9]){re.escape(key.lower())}(?:[^a-z0-9]|$)", pdf.lower()):
+            if re.search(
+                rf"(?:^|[^a-z0-9]){re.escape(key.lower())}(?:[^a-z0-9]|$)", pdf.lower()
+            ):
                 found = True
                 break
             # Fallback fuzzy match (Author_Year format)
@@ -785,11 +797,17 @@ def build_audit_proposal(bib_path: Path, pdf_dir: Path, strict_all: bool = False
                     first_author = first_author_raw.split(",")[0].strip()
                 else:
                     first_author = first_author_raw.split(" ")[-1].strip()
-                    
-                if re.search(rf"(?:^|[^a-z0-9]){re.escape(first_author.lower())}(?:[^a-z0-9]|$)", pdf.lower()) and year in pdf:
+
+                if (
+                    re.search(
+                        rf"(?:^|[^a-z0-9]){re.escape(first_author.lower())}(?:[^a-z0-9]|$)",
+                        pdf.lower(),
+                    )
+                    and year in pdf
+                ):
                     found = True
                     break
-                    
+
         if not found:
             unresolved.append({"source": key, "reason": "PDF not found or mismatch"})
 
@@ -799,7 +817,9 @@ def build_audit_proposal(bib_path: Path, pdf_dir: Path, strict_all: bool = False
         "main_tex": "",
         "target_bib": bib_path.name,
         "file_digests": {
-            bib_path.name: hashlib.sha256(content.encode("utf-8")).hexdigest() if content else ""
+            bib_path.name: hashlib.sha256(content.encode("utf-8")).hexdigest()
+            if content
+            else ""
         },
         "citations": [],
         "tex_changes": [],
@@ -1572,8 +1592,10 @@ def main(argv: list[str] | None = None) -> int:
         install_aea_style(args.project)
     elif args.command == "audit":
         proposal = build_audit_proposal(args.bib, args.pdf_dir, strict_all=args.all)
-        args.output.write_text(json.dumps(proposal, indent=2), encoding="utf-8")
-        print(f"Audit proposal saved to {args.output}")
+        args.output.write_text(
+            json.dumps(proposal, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
     return 0
 
 
