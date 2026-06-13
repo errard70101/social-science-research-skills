@@ -7,44 +7,59 @@ description: Use when a LaTeX project needs a new or updated BibTeX bibliography
 
 ## Workflow
 
-1. Confirm the project root or main `.tex` file.
-2. Locate this skill directory and assign its absolute path to `SKILL_DIR`.
-3. Scan without modifying the project:
+1. **STOP AND ASK THE USER:** "請問您這次需要執行哪一種文獻管理模式？請選擇："
+   - **0. Initialize (首次深度健檢)**: Forces every `.bib` entry to be verified online. (Command: `audit --all`)
+   - **1. Scan (文獻補漏)**: Checks `.tex` vs `.bib` for missing keys. (Command: `scan`)
+   - **2. Audit (日常 PDF 雙向稽核)**: Checks `.bib` vs `references/` for missing PDFs. (Command: `audit`)
+   - **3. Update (單點強制更新)**: Forces update on a specific key. (Command: `update-entry`)
+2. Confirm the project root, the main `.tex` file, or the `references.bib` file.
+3. Locate this skill directory and assign its absolute path to `SKILL_DIR`.
+4. Based on the selected mode, generate the proposal without modifying the project:
 
+   **Mode 1 (Scan):**
    ```bash
    python "$SKILL_DIR/scripts/manage_bibliography.py" scan \
      --project /path/to/project \
      --output /path/to/project/bibliography-proposal.json
    ```
 
-4. Review missing citation keys and inspect prose for likely uncited works.
+   **Mode 0 & 2 (Audit / Initialize):**
+   ```bash
+   python "$SKILL_DIR/scripts/manage_bibliography.py" audit \
+     --bib /path/to/project/references.bib \
+     --pdf-dir /path/to/project/references \
+     --output /path/to/project/bibliography-proposal.json \
+     [--all]  # Include --all for Mode 0 Initialize
+   ```
+
+5. Review missing citation keys and inspect prose for likely uncited works.
    Never treat a citation key or prose mention as proof of publication identity.
-5. Research each candidate according to `references/verification-rules.md`. You MUST use an available literature search skill (e.g., literature-search-repec or literature-search-openalex) to retrieve the ground truth metadata.
-6. Give each candidate and its evidence to an independent subagent for a fresh
+6. Research each candidate according to `references/verification-rules.md`. You MUST use an available literature search skill (e.g., literature-search-repec or literature-search-openalex) to retrieve the ground truth metadata.
+7. Give each candidate and its evidence to an independent subagent for a fresh
    online check. If subagents are unavailable, perform a separate second lookup
    without relying on first-pass conclusions.
-7. Format titles according to `references/title-case-rules.md`.
-8. Populate each proposal entry with its BibTeX type, fields, source URLs,
+8. Format titles according to `references/title-case-rules.md`.
+9. Populate each proposal entry with its BibTeX type, fields, source URLs,
    conflicts, verifier identity, and status. Use `verified` only after the
    independent check succeeds.
-9. Ask the user to approve every prose-inferred reference and every correction
-   to an existing entry. Corrections must include the existing fields as
-   `before_fields`, use `approved` status, and set both approval flags to true.
-10. Validate the completed proposal:
+10. Ask the user to approve every prose-inferred reference and every correction
+    to an existing entry. Corrections must include the existing fields as
+    `before_fields`, use `approved` status, and set both approval flags to true.
+11. Validate the completed proposal:
 
     ```bash
     python "$SKILL_DIR/scripts/manage_bibliography.py" validate \
       --proposal /path/to/project/bibliography-proposal.json
     ```
 
-11. Apply only after validation succeeds:
+12. Apply only after validation succeeds:
 
     ```bash
     python "$SKILL_DIR/scripts/manage_bibliography.py" apply \
       --proposal /path/to/project/bibliography-proposal.json
     ```
 
-12. Review `bibliography-apply-result.json` and compile the project when a TeX
+13. Review `bibliography-apply-result.json` and compile the project when a TeX
     toolchain is available.
 
 Re-run `scan` whenever a tracked `.tex` or `.bib` file changes.
