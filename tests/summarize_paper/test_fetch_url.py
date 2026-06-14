@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -300,6 +301,7 @@ def test_url_with_query_params_uses_path_portion_for_filename(
     )
 
     saved = Path(result["pdf_path"])
-    assert saved.name == "paper.pdf"
+    sha8 = hashlib.sha256(pdf_bytes).hexdigest()[:8]
+    assert saved.name == f"paper-{sha8}.pdf"
     assert saved.exists()
     assert saved.read_bytes() == pdf_bytes

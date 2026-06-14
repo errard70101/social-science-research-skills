@@ -88,19 +88,6 @@ def _safe_filename_from_url(url: str) -> str:
     return name
 
 
-def _unique_path(directory: Path, filename: str) -> Path:
-    candidate = directory / filename
-    if not candidate.exists():
-        return candidate
-    stem = candidate.stem
-    suffix = candidate.suffix
-    for counter in range(1, 1000):
-        attempt = directory / f"{stem}-{counter}{suffix}"
-        if not attempt.exists():
-            return attempt
-    raise RuntimeError(f"could not find a free filename for {filename}")
-
-
 def _rewrite_known_url(url: str) -> tuple[str, str | None]:
     match = ARXIV_ABS_PATTERN.match(url)
     if match:
@@ -127,7 +114,13 @@ def _is_pdf_response(response) -> bool:
 
 def _save_pdf_bytes(output_dir: Path, source_url: str, content: bytes) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
-    destination = _unique_path(output_dir, _safe_filename_from_url(source_url))
+    source_name = Path(_safe_filename_from_url(source_url))
+    content_sha256 = _sha256_bytes(content)
+    destination = output_dir / (
+        f"{source_name.stem}-{content_sha256[:8]}{source_name.suffix}"
+    )
+    if destination.exists() and _sha256_file(destination) == content_sha256:
+        return destination
     destination.write_bytes(content)
     return destination
 

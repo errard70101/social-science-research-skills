@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -68,9 +70,42 @@ def test_url_download_does_not_clobber_existing_file(summary_module, tmp_path: P
 
     saved = Path(result["pdf_path"])
     assert saved != existing
-    assert saved.name == "paper-1.pdf"
+    assert saved.name == f"paper-{hashlib.sha256(pdf_bytes).hexdigest()[:8]}.pdf"
     assert saved.read_bytes() == pdf_bytes
     assert existing.read_bytes() == b"original"
+
+
+def test_refetching_same_url_reuses_single_content_addressed_pdf(
+    summary_module, tmp_path: Path
+):
+    pdf_bytes = b"%PDF-1.4 repeatable"
+    url = "https://example.org/paper.pdf"
+    client = FakeClient(
+        {
+            url: FakeResponse(
+                status_code=200,
+                headers={"content-type": "application/pdf"},
+                content=pdf_bytes,
+                url=url,
+            ),
+        }
+    )
+
+    first = summary_module.resolve_input(
+        url,
+        output_dir=tmp_path,
+        http_client_factory=lambda: client,
+    )
+    second = summary_module.resolve_input(
+        url,
+        output_dir=tmp_path,
+        http_client_factory=lambda: client,
+    )
+
+    pdfs = list(tmp_path.glob("*.pdf"))
+    assert len(pdfs) == 1
+    assert first["pdf_path"] == second["pdf_path"] == str(pdfs[0].resolve())
+    assert re.fullmatch(r"paper-[0-9a-f]{8}\.pdf", pdfs[0].name)
 
 
 def test_fetch_cli_command_writes_artifact(summary_module, tmp_path: Path):
