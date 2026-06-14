@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 
 def _valid_content() -> dict:
     return {
@@ -90,6 +92,60 @@ def test_render_writes_tex_with_substituted_slots(summary_module, tmp_path: Path
     assert "\\citep{acemoglu2001colonial}" in text
     assert "\\bibliographystyle{aea}" in text
     assert "\\bibliography{references}" in text
+
+
+def test_render_reports_content_path_for_missing_nested_slot(
+    summary_module, tmp_path: Path, monkeypatch
+):
+    extract_path = _make_extract(tmp_path)
+    content_path = tmp_path / "content.json"
+    content_path.write_text(json.dumps(_valid_content()))
+    output_tex = tmp_path / "summary.tex"
+    monkeypatch.setattr(summary_module, "_load_template", lambda: "<<paper.abstract>>")
+
+    with pytest.raises(ValueError) as error:
+        summary_module.render(
+            extract_path=extract_path,
+            content_path=content_path,
+            output_tex=output_tex,
+        )
+
+    message = str(error.value)
+    assert str(content_path) in message
+    assert "paper.abstract" in message
+
+
+def test_render_reports_content_path_for_missing_top_level_slot(
+    summary_module, tmp_path: Path, monkeypatch
+):
+    extract_path = _make_extract(tmp_path)
+    content = _valid_content()
+    content.pop("one_sentence")
+    content_path = tmp_path / "content.json"
+    content_path.write_text(json.dumps(content))
+    output_tex = tmp_path / "summary.tex"
+    monkeypatch.setattr(summary_module, "validate_content", lambda content: None)
+    monkeypatch.setattr(
+        summary_module,
+        "CONTENT_REQUIRED_SECTIONS",
+        tuple(
+            section
+            for section in summary_module.CONTENT_REQUIRED_SECTIONS
+            if section != "one_sentence"
+        ),
+    )
+    monkeypatch.setattr(summary_module, "_load_template", lambda: "<<one_sentence>>")
+
+    with pytest.raises(ValueError) as error:
+        summary_module.render(
+            extract_path=extract_path,
+            content_path=content_path,
+            output_tex=output_tex,
+        )
+
+    message = str(error.value)
+    assert str(content_path) in message
+    assert "one_sentence" in message
 
 
 def test_render_is_atomic(summary_module, tmp_path: Path):

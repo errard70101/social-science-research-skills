@@ -925,7 +925,13 @@ def render(
         asset_relative_dir=f"{summary_stem}/figures",
     )
     template = _load_template()
-    rendered = _substitute(template, context)
+    try:
+        rendered = _substitute(template, context)
+    except KeyError as exc:
+        raise ValueError(
+            f"Content JSON {content_path} is missing a required template value: "
+            f"{exc.args[0]}. Add the missing field at that dotted path in this file."
+        ) from exc
     rendered = _strip_empty_cites(rendered)
     _atomic_write_text(output_tex, rendered)
     return {
