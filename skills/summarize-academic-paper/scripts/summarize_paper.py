@@ -749,7 +749,7 @@ def _ensure_candidate(label: str, candidates: list[dict[str, Any]]) -> dict[str,
     raise ValueError(f"requested headline visual {label!r} not in extract candidates")
 
 
-def _save_visual_image(
+def _save_page_snapshot(
     pdf_path: Path,
     page_number: int,
     asset_dir: Path,
@@ -759,7 +759,7 @@ def _save_visual_image(
         payload = _render_page_to_png(pdf_path, page_number)
     except ImportError as error:
         raise RuntimeError(
-            "Cropping the headline visual requires PyMuPDF, available "
+            "Rendering a page snapshot requires PyMuPDF, available "
             "via the optional render extra. "
             "Install it with: pip install '.[render]'"
         ) from error
@@ -792,7 +792,7 @@ def _build_visual_block(
                     f"candidate page ({candidate_page}) for label {label!r}"
                 )
         page_number = candidate_page
-        image_path = _save_visual_image(pdf_path, page_number, asset_dir, label)
+        image_path = _save_page_snapshot(pdf_path, page_number, asset_dir, label)
         relative = f"{asset_relative_dir}/{image_path.name}"
         return (
             "\\begin{figure}[ht]\n"

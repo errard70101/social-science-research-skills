@@ -117,7 +117,7 @@ When writing summary content JSON:
 
 - Do not invent coefficients, standard errors, sample sizes, statistical
   significance, journal names, or predecessor citations.
-- Do not OCR or paraphrase econometric tables; use the cropped image mode for
-  the headline visual unless you can supply LaTeX directly from the source.
+- Do not OCR or paraphrase econometric tables; use the page-snapshot image mode
+  for the headline visual unless you can supply LaTeX directly from the source.
 - Do not write the summary from memory of the paper. Read the extracted text
   for every claim.

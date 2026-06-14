@@ -112,9 +112,10 @@ Warn in the output JSON and continue when:
   estimates, or claims of statistical significance.
 - Never invent a venue or year. When uncertain, use
   `paper.venue = "working paper"`.
-- Cropped image is the default headline visual. Use the reconstructed table
-  mode only when you can supply the LaTeX from the paper text without
-  paraphrasing.
+- Image mode produces a page-level snapshot of the page where the table or
+  figure caption appears, not a tight crop. Use reconstructed table mode when
+  a clean visual is needed and you can supply the LaTeX from the paper text
+  without paraphrasing.
 - Predecessor citations come only from the paper's own related-work or
   introduction sections.
 - Never bypass `unresolved` or `no-extractable-text` reports.
@@ -141,7 +142,7 @@ Warn in the output JSON and continue when:
 
 ## Dependencies
 
-Python 3.10+ with `pypdf>=5.0` and `httpx>=0.27`. For cropped headline
+Python 3.10+ with `pypdf>=5.0` and `httpx>=0.27`. For page-snapshot headline
 visuals install the optional `render` extra:
 
 ```bash
