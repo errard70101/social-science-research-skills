@@ -1,7 +1,6 @@
 \documentclass[11pt]{article}
 
 \usepackage{fontspec}
-\setmainfont{Latin Modern Roman}
 \usepackage[margin=0.9in]{geometry}
 \usepackage{microtype}
 \usepackage{amsmath}
@@ -52,7 +51,8 @@
 \subsection*{Follow-ups}
 <<followups>>
 
-\bibliographystyle{aea}
+% Bibliography style; manage-latex-bibliography rewrites this to {aea} when aea.bst is installed.
+\bibliographystyle{plainnat}
 \bibliography{references}
 
 \end{document}

@@ -65,10 +65,11 @@ description: Use when preparing for or hosting an academic seminar and you need 
 7. Hand off to `manage-latex-bibliography` to populate `references.bib`.
    That skill scans the new `.tex`, identifies the paper-of-record key and
    each predecessor key as missing, verifies them online, and writes
-   `references.bib`. The hand-off does not require user confirmation each
-   time. User confirmation is required only when the bibliography skill
-   installs or copies `aea.bst`, or when it proposes nontrivial modifications
-   to existing files.
+   `references.bib`. It is also expected to rewrite `\bibliographystyle{}`
+   from `plainnat` to `aea` once `aea.bst` is in place. The hand-off does not
+   require user confirmation each time. User confirmation is required only
+   when the bibliography skill installs or copies `aea.bst`, or when it
+   proposes nontrivial modifications to existing files.
 
 8. Run the final validation checklist (below) and inform the user of the
    output path and any remaining warnings.
@@ -149,8 +150,10 @@ visuals install the optional `render` extra:
 python -m pip install '.[render]'
 ```
 
-XeLaTeX, BibTeX, and `aea.bst` are required to compile the output;
-`manage-latex-bibliography` handles `aea.bst` installation.
+XeLaTeX and BibTeX can compile the rendered `.tex` immediately with the safe
+default `\bibliographystyle{plainnat}`, even when the user defers step 7.
+`manage-latex-bibliography` installs `aea.bst` and changes the document to
+`\bibliographystyle{aea}` during the bibliography hand-off.
 
 The optional `UNPAYWALL_EMAIL` environment variable enables the Unpaywall
 fallback for paywalled DOIs.

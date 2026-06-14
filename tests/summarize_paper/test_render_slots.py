@@ -92,7 +92,7 @@ def test_render_writes_tex_with_substituted_slots(summary_module, tmp_path: Path
     assert "Colonial Origins of Comparative Development" in text
     assert "Acemoglu, Johnson, and Robinson (2001)" in text
     assert "\\citep{acemoglu2001colonial}" in text
-    assert "\\bibliographystyle{aea}" in text
+    assert "\\bibliographystyle{plainnat}" in text
     assert "\\bibliography{references}" in text
 
 
