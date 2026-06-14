@@ -31,10 +31,12 @@ def _valid_content() -> dict:
 
 def _make_extract(tmp_path: Path) -> Path:
     artifact = {
-        "schema_version": 1,
+        "schema_version": 2,
         "pdf_path": str(tmp_path / "paper.pdf"),
         "page_count": 1,
-        "pages": [{"page": 1, "text": ""}],
+        "pages_path": str(
+            (tmp_path / "summarize-paper-extract.json.pages.jsonl").resolve()
+        ),
         "embedded_metadata": {},
         "title_guess": None,
         "author_guesses": [],

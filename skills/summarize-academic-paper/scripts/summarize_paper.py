@@ -8,7 +8,7 @@ import os
 import re
 import tempfile
 import urllib.parse
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
@@ -539,6 +539,12 @@ def collect_caption_candidates(
     return candidates
 
 
+def load_extract_pages(extract: dict) -> Iterable[dict]:
+    with Path(extract["pages_path"]).open(encoding="utf-8") as handle:
+        for line in handle:
+            yield json.loads(line)
+
+
 def extract(
     fetch_path: Path,
     output_path: Path,
@@ -562,15 +568,19 @@ def extract(
         warnings.append("no-extractable-text")
     if not author_guesses:
         warnings.append("author-guess-empty")
+    table_candidates = collect_caption_candidates(pages)
+    pages_path = Path(f"{output_path}.pages.jsonl").resolve()
+    pages_payload = "".join(f"{json.dumps(page)}\n" for page in pages)
+    _atomic_write_text(pages_path, pages_payload)
     artifact = {
-        "schema_version": 1,
+        "schema_version": 2,
         "pdf_path": str(pdf_path),
         "page_count": len(pages),
-        "pages": pages,
+        "pages_path": str(pages_path),
         "embedded_metadata": metadata,
         "title_guess": title_guess,
         "author_guesses": author_guesses,
-        "table_candidates": collect_caption_candidates(pages),
+        "table_candidates": table_candidates,
         "warnings": warnings,
     }
     output_path.parent.mkdir(parents=True, exist_ok=True)

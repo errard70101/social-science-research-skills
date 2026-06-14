@@ -49,20 +49,35 @@ def test_extract_records_per_page_text(summary_module, tmp_path: Path):
         metadata={"/Title": "Stub Title", "/Author": "Stub Author"},
     )
 
+    output_path = tmp_path / "summarize-paper-extract.json"
     artifact = summary_module.extract(
         fetch_path,
-        output_path=tmp_path / "summarize-paper-extract.json",
+        output_path=output_path,
         reader_factory=make_reader_factory(reader),
     )
 
-    assert artifact["schema_version"] == 1
+    assert artifact["schema_version"] == 2
     assert artifact["page_count"] == 3
     expected_page_0 = {"page": 1, "text": "Page one body.\n\nJane Author, John Author"}
-    assert artifact["pages"][0] == expected_page_0
-    assert artifact["pages"][2] == {"page": 3, "text": ""}
+    assert "pages" not in artifact
+    pages_path = Path(artifact["pages_path"])
+    assert pages_path == Path(f"{output_path}.pages.jsonl").resolve()
+    assert pages_path.read_text(encoding="utf-8").splitlines() == [
+        json.dumps(expected_page_0),
+        json.dumps({"page": 2, "text": "Page two body."}),
+        json.dumps({"page": 3, "text": ""}),
+    ]
+    pages = summary_module.load_extract_pages(artifact)
+    assert iter(pages) is pages
+    assert list(pages) == [
+        expected_page_0,
+        {"page": 2, "text": "Page two body."},
+        {"page": 3, "text": ""},
+    ]
     assert artifact["embedded_metadata"] == {
         "/Title": "Stub Title",
         "/Author": "Stub Author",
     }
     assert artifact["pdf_path"] == str(pdf)
     assert artifact["warnings"] == []
+    assert not list(tmp_path.glob("*.tmp"))
