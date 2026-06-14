@@ -41,6 +41,24 @@ description: Use when academic paper PDFs, appendices, slides, or replication ma
 Use `--offline` with `propose` when network access is unavailable or not
 permitted.
 
+## Custom Filename Templates
+
+The default convention matches the section below. Projects with stricter local
+conventions can override the template, case, and separator without forking the
+script:
+
+```bash
+python "$SKILL_DIR/scripts/rename_references.py" propose \
+  --directory /path/to/references \
+  --output /path/to/references/proposed-renames.json \
+  --template "{authors}-{year}-{title}{suffix}{ext}" \
+  --transform kebab-case \
+  --separator -
+```
+
+Placeholders: `{authors}`, `{year}`, `{title}`, `{suffix}`, `{ext}`. Supported
+transforms: `none` (default), `lowercase`, `kebab-case`, `snake_case`.
+
 ## Naming Convention
 
 - Main paper: `[Authors]_[Year]_[Title].pdf`

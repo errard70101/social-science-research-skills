@@ -26,6 +26,32 @@ KIND_SUFFIXES = {
     "replication": "_Replication",
 }
 NAME_SUFFIXES = {"jr", "sr", "ii", "iii", "iv", "v"}
+DEFAULT_TEMPLATE = "{authors}_{year}_{title}{suffix}{ext}"
+SUPPORTED_TRANSFORMS = {"none", "lowercase", "kebab-case", "snake_case"}
+
+
+@dataclass(frozen=True)
+class NameFormat:
+    template: str = DEFAULT_TEMPLATE
+    transform: str = "none"
+    separator: str = "_"
+
+    def __post_init__(self) -> None:
+        if self.transform not in SUPPORTED_TRANSFORMS:
+            raise ValueError(f"unsupported transform: {self.transform}")
+        if not self.separator:
+            raise ValueError("separator must be a nonempty string")
+
+    def apply_transform(self, value: str) -> str:
+        if self.transform == "none":
+            return value
+        if self.transform == "lowercase":
+            return value.lower()
+        if self.transform == "kebab-case":
+            return re.sub(r"[_\s]+", "-", value).lower()
+        if self.transform == "snake_case":
+            return re.sub(r"[-\s]+", "_", value).lower()
+        raise ValueError(f"unsupported transform: {self.transform}")
 
 
 class MetadataProvider(Protocol):
@@ -111,11 +137,11 @@ def ascii_token(value: str, *, allow_hyphen: bool = True) -> str:
     return re.sub(allowed, "", ascii_value)
 
 
-def clean_title(title: str) -> str:
+def clean_title(title: str, *, separator: str = "_") -> str:
     normalized = unicodedata.normalize("NFKD", title)
     ascii_title = normalized.encode("ascii", "ignore").decode("ascii")
     words = re.findall(r"[A-Za-z0-9]+", ascii_title)
-    return "_".join(words)
+    return separator.join(words)
 
 
 def family_name(author: Mapping[str, Any]) -> str:
@@ -148,14 +174,16 @@ def _infer_author_family_name(value: str) -> str:
     return ""
 
 
-def format_authors(authors: Sequence[Mapping[str, Any]]) -> str:
+def format_authors(
+    authors: Sequence[Mapping[str, Any]], *, separator: str = "_"
+) -> str:
     names = [family_name(author) for author in authors]
     names = [name for name in names if name]
     if not names:
         return ""
     if len(names) <= 3:
-        return "_".join(names)
-    return f"{names[0]}_et_al"
+        return separator.join(names)
+    return f"{names[0]}{separator}et{separator}al"
 
 
 def normalize_doi(value: str) -> str:
@@ -206,11 +234,13 @@ def build_filename(
     *,
     kind: str,
     max_length: int = 180,
+    fmt: NameFormat | None = None,
 ) -> str:
+    fmt = fmt or NameFormat()
     author_entries = metadata.get("authors", [])
-    authors = format_authors(author_entries)
+    authors = format_authors(author_entries, separator=fmt.separator)
     year_value = metadata.get("year")
-    title = clean_title(str(metadata.get("title") or ""))
+    title = clean_title(str(metadata.get("title") or ""), separator=fmt.separator)
     if not authors or year_value is None or year_value == "":
         raise ValueError("authors and year are required to generate a filename")
     if any(not family_name(author) for author in author_entries):
@@ -221,14 +251,31 @@ def build_filename(
     if kind not in KIND_SUFFIXES:
         raise ValueError(f"unsupported item kind: {kind}")
     extension = "" if kind == "replication" else ".pdf"
-    preserved_prefix = f"{authors}_{year}_"
-    return truncate_stem(
-        title,
-        KIND_SUFFIXES[kind],
-        extension,
-        max_length,
-        preserved_prefix=preserved_prefix,
-    )
+    suffix = KIND_SUFFIXES[kind]
+    if fmt.separator != "_" and suffix:
+        suffix = suffix.replace("_", fmt.separator)
+
+    def render(title_value: str) -> str:
+        rendered = fmt.template.format(
+            authors=authors,
+            year=year,
+            title=title_value,
+            suffix=suffix,
+            ext=extension,
+        )
+        return fmt.apply_transform(rendered)
+
+    full = render(title)
+    if len(full) <= max_length:
+        return full
+    # Title is the only trimmable field; shrink it until the result fits.
+    available = max_length - (len(render("")) - 0)
+    if available < 1:
+        raise ValueError("max_length leaves no room for a nonempty title")
+    truncated = title[:available].rstrip("_-")
+    if not truncated:
+        raise ValueError("max_length leaves no room for a nonempty title")
+    return render(truncated)
 
 
 def read_pdf_candidate(path: Path) -> dict[str, Any]:
@@ -311,9 +358,11 @@ def related_to(main: Path, candidate: Path) -> bool:
     return candidate_stem[len(main_stem)] in {"_", "-", ".", " "}
 
 
-def _has_required_metadata(metadata: Mapping[str, Any]) -> bool:
+def _has_required_metadata(
+    metadata: Mapping[str, Any], *, fmt: NameFormat | None = None
+) -> bool:
     try:
-        build_filename(metadata, kind="main-paper")
+        build_filename(metadata, kind="main-paper", fmt=fmt)
     except (TypeError, ValueError):
         return False
     return True
@@ -324,19 +373,20 @@ def resolve_metadata(
     *,
     provider: MetadataProvider | None,
     threshold: float = 0.9,
+    fmt: NameFormat | None = None,
 ) -> ResolutionResult | None:
     try:
         local = read_pdf_candidate(path)
     except Exception:
         local = {}
-    if _has_required_metadata(local):
+    if _has_required_metadata(local, fmt=fmt):
         return ResolutionResult(dict(local), "review", "pdf-metadata")
     if provider and local.get("doi"):
         try:
             metadata = provider.lookup_doi(str(local["doi"]))
         except Exception:
             metadata = None
-        if metadata and _has_required_metadata(metadata):
+        if metadata and _has_required_metadata(metadata, fmt=fmt):
             confidence = "review" if metadata.get("requires_review") else "high"
             return ResolutionResult(dict(metadata), confidence, "doi-lookup")
     query = str(local.get("title") or path.stem.replace("_", " "))
@@ -348,7 +398,7 @@ def resolve_metadata(
         if (
             candidate
             and accept_title_match(query, candidate, threshold=threshold)
-            and _has_required_metadata(candidate)
+            and _has_required_metadata(candidate, fmt=fmt)
         ):
             return ResolutionResult(dict(candidate), "review", "title-search")
     return None
@@ -359,7 +409,9 @@ def propose(
     output: Path,
     *,
     provider: MetadataProvider | None,
+    fmt: NameFormat | None = None,
 ) -> dict[str, Any]:
+    fmt = fmt or NameFormat()
     root = directory.resolve()
     output_path = output.resolve()
     items = []
@@ -386,7 +438,7 @@ def propose(
     claimed: set[Path] = set()
     for path in main_papers:
         claimed.add(path)
-        resolution = resolve_metadata(path, provider=provider)
+        resolution = resolve_metadata(path, provider=provider, fmt=fmt)
         if not resolution:
             unresolved.append(
                 {
@@ -397,7 +449,7 @@ def propose(
             continue
         metadata = resolution.metadata
         try:
-            destination = build_filename(metadata, kind="main-paper")
+            destination = build_filename(metadata, kind="main-paper", fmt=fmt)
         except ValueError as error:
             unresolved.append({"source": path.name, "reason": str(error)})
             continue
@@ -420,7 +472,7 @@ def propose(
             ):
                 continue
             try:
-                related_destination = build_filename(metadata, kind=kind)
+                related_destination = build_filename(metadata, kind=kind, fmt=fmt)
             except ValueError as error:
                 unresolved.append({"source": candidate.name, "reason": str(error)})
                 claimed.add(candidate)
@@ -651,6 +703,25 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Disable OpenAlex metadata lookups.",
     )
+    propose_parser.add_argument(
+        "--template",
+        default=DEFAULT_TEMPLATE,
+        help=(
+            "Filename template with placeholders {authors}, {year}, {title}, "
+            "{suffix}, and {ext}. Default: " + DEFAULT_TEMPLATE
+        ),
+    )
+    propose_parser.add_argument(
+        "--transform",
+        default="none",
+        choices=sorted(SUPPORTED_TRANSFORMS),
+        help="Case/separator transform applied to the rendered filename.",
+    )
+    propose_parser.add_argument(
+        "--separator",
+        default="_",
+        help="Separator used to join multi-word authors and title tokens.",
+    )
     validate_parser = subparsers.add_parser("validate")
     validate_parser.add_argument("--mapping", required=True, type=Path)
     apply_parser = subparsers.add_parser("apply")
@@ -663,7 +734,12 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     if args.command == "propose":
         provider = None if args.offline else OpenAlexProvider()
-        propose(args.directory, args.output, provider=provider)
+        fmt = NameFormat(
+            template=args.template,
+            transform=args.transform,
+            separator=args.separator,
+        )
+        propose(args.directory, args.output, provider=provider, fmt=fmt)
     if args.command == "validate":
         try:
             data = load_mapping(args.mapping)

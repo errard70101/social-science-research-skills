@@ -34,6 +34,7 @@ def test_bibliography_parser_has_exact_subcommands(bibliography_module):
         "apply",
         "install-aea-style",
         "audit",
+        "verify-existing",
     }
 
 
@@ -57,8 +58,22 @@ def test_bibliography_parser_has_exact_subcommands(bibliography_module):
             {"project": Path("paper"), "confirm_download": True},
         ),
         (
-            ["audit", "--bib", "refs.bib", "--pdf-dir", "pdfs", "--output", "audit.json", "--all"],
-            {"bib": Path("refs.bib"), "pdf_dir": Path("pdfs"), "output": Path("audit.json"), "all": True},
+            [
+                "audit",
+                "--bib",
+                "refs.bib",
+                "--pdf-dir",
+                "pdfs",
+                "--output",
+                "audit.json",
+                "--all",
+            ],
+            {
+                "bib": Path("refs.bib"),
+                "pdf_dir": Path("pdfs"),
+                "output": Path("audit.json"),
+                "all": True,
+            },
         ),
     ],
 )

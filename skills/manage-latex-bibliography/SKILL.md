@@ -12,6 +12,7 @@ description: Use when a LaTeX project needs a new or updated BibTeX bibliography
    - **1. Scan (文獻補漏)**: Checks `.tex` vs `.bib` for missing keys. (Command: `scan`)
    - **2. Audit (日常 PDF 雙向稽核)**: Checks `.bib` vs `references/` for missing PDFs. (Command: `audit`)
    - **3. Update (單點強制更新)**: Forces update on a specific key. (Command: `update-entry`)
+   - **4. Verify Existing (現有條目元資料對帳)**: Cross-checks every existing `.bib` entry against Crossref for DOI, title, and year drift. (Command: `verify-existing`)
 2. Confirm the project root, the main `.tex` file, or the `references.bib` file.
 3. Locate this skill directory and assign its absolute path to `SKILL_DIR`.
 4. Based on the selected mode, generate the proposal without modifying the project:
@@ -39,6 +40,17 @@ description: Use when a LaTeX project needs a new or updated BibTeX bibliography
      --pdf-dir /path/to/project/references \
      --output /path/to/project/bibliography-proposal.json
    ```
+
+   **Mode 4 (Verify Existing):**
+   ```bash
+   python "$SKILL_DIR/scripts/manage_bibliography.py" verify-existing \
+     --bib /path/to/project/references.bib \
+     --output /path/to/project/bibliography-verify-report.json
+   ```
+
+   The report lists each entry with `verified`, `inconsistent`, `unverified`,
+   or `skipped` status. If Crossref is unreachable, entries gracefully degrade
+   to `unverified` so the workflow does not crash.
 
    **Mode 3 (Update):**
    ```bash

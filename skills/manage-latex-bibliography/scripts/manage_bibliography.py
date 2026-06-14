@@ -10,6 +10,7 @@ import re
 import stat
 import tempfile
 import unicodedata
+import urllib.parse
 import urllib.request
 import zipfile
 from datetime import datetime, timezone
@@ -1543,6 +1544,165 @@ def apply_proposal(proposal: dict[str, Any]) -> dict[str, object]:
     return result
 
 
+CROSSREF_WORKS_URL = "https://api.crossref.org/works/"
+
+
+def _crossref_fetcher(doi: str) -> dict[str, Any]:
+    request = urllib.request.Request(
+        CROSSREF_WORKS_URL + urllib.parse.quote(doi, safe="/"),
+        headers={
+            "User-Agent": "social-science-research-skills/0.1 "
+            "(https://github.com/errard70101/social-science-research-skills)",
+            "Accept": "application/json",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=15) as response:
+        payload = json.loads(response.read().decode("utf-8"))
+    message = payload.get("message")
+    if not isinstance(message, dict):
+        raise ValueError("unexpected Crossref payload")
+    return message
+
+
+def _crossref_year(message: dict[str, Any]) -> str | None:
+    for key in ("issued", "published-print", "published-online", "created"):
+        candidate = message.get(key)
+        if isinstance(candidate, dict):
+            parts = candidate.get("date-parts")
+            if (
+                isinstance(parts, list)
+                and parts
+                and isinstance(parts[0], list)
+                and parts[0]
+                and isinstance(parts[0][0], int)
+            ):
+                return str(parts[0][0])
+    return None
+
+
+def _crossref_title(message: dict[str, Any]) -> str | None:
+    titles = message.get("title")
+    if isinstance(titles, list) and titles and isinstance(titles[0], str):
+        return titles[0]
+    return None
+
+
+def _normalize_title(value: str) -> str:
+    plain = re.sub(r"\\[A-Za-z]+", " ", value)
+    plain = re.sub(r"[{}$]", " ", plain)
+    return re.sub(r"[^a-z0-9]+", " ", plain.lower()).strip()
+
+
+def verify_existing_entries(
+    bib_path: Path,
+    *,
+    fetcher=_crossref_fetcher,
+) -> dict[str, Any]:
+    """Cross-check existing .bib entries against an external metadata source.
+
+    Returns a Metadata Inconsistency Report. If `fetcher` raises, the entry is
+    tagged unverified rather than crashing the run (graceful degradation).
+    """
+    content = bib_path.read_text(encoding="utf-8") if bib_path.is_file() else ""
+    entries = parse_bibtex_entries(content)
+    report: list[dict[str, Any]] = []
+    available = True
+
+    for entry in entries:
+        key = str(entry.get("key", ""))
+        fields = entry.get("fields") or {}
+        if not isinstance(fields, dict):
+            fields = {}
+        raw_doi = str(fields.get("doi", "")).strip()
+        if not raw_doi:
+            report.append(
+                {
+                    "citation_key": key,
+                    "status": "skipped",
+                    "reason": "no DOI available",
+                    "discrepancies": [],
+                }
+            )
+            continue
+
+        doi = normalize_doi(raw_doi)
+        if not available:
+            report.append(
+                {
+                    "citation_key": key,
+                    "status": "unverified",
+                    "reason": "external metadata source unavailable",
+                    "doi": doi,
+                    "discrepancies": [],
+                }
+            )
+            continue
+
+        try:
+            message = fetcher(doi)
+        except Exception as error:  # noqa: BLE001 - graceful degradation
+            available = False
+            report.append(
+                {
+                    "citation_key": key,
+                    "status": "unverified",
+                    "reason": f"fetch failed: {error}",
+                    "doi": doi,
+                    "discrepancies": [],
+                }
+            )
+            continue
+
+        discrepancies: list[dict[str, str]] = []
+        local_year = re.sub(r"\D", "", str(fields.get("year", "")))
+        remote_year = _crossref_year(message) or ""
+        if local_year and remote_year and local_year != remote_year:
+            discrepancies.append(
+                {"field": "year", "local": local_year, "remote": remote_year}
+            )
+
+        local_title = str(fields.get("title", ""))
+        remote_title = _crossref_title(message) or ""
+        if (
+            local_title
+            and remote_title
+            and _normalize_title(local_title) != _normalize_title(remote_title)
+        ):
+            discrepancies.append(
+                {"field": "title", "local": local_title, "remote": remote_title}
+            )
+
+        remote_doi = str(message.get("DOI", "")).lower()
+        if remote_doi and remote_doi != doi:
+            discrepancies.append(
+                {"field": "doi", "local": doi, "remote": remote_doi}
+            )
+
+        report.append(
+            {
+                "citation_key": key,
+                "status": "inconsistent" if discrepancies else "verified",
+                "doi": doi,
+                "discrepancies": discrepancies,
+            }
+        )
+
+    return {
+        "schema_version": SCHEMA_VERSION,
+        "source": "crossref",
+        "bib_path": str(bib_path),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "entries": report,
+        "summary": {
+            "total": len(report),
+            "verified": sum(1 for r in report if r["status"] == "verified"),
+            "inconsistent": sum(1 for r in report if r["status"] == "inconsistent"),
+            "unverified": sum(1 for r in report if r["status"] == "unverified"),
+            "skipped": sum(1 for r in report if r["status"] == "skipped"),
+        },
+    }
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Scan, validate, and update a LaTeX bibliography."
@@ -1569,6 +1729,13 @@ def build_parser() -> argparse.ArgumentParser:
     audit_parser.add_argument("--output", type=Path, required=True)
     audit_parser.add_argument("--all", action="store_true")
 
+    verify_parser = subparsers.add_parser(
+        "verify-existing",
+        help="Cross-check existing .bib entries against Crossref.",
+    )
+    verify_parser.add_argument("--bib", type=Path, required=True)
+    verify_parser.add_argument("--output", type=Path, required=True)
+
     return parser
 
 
@@ -1594,6 +1761,12 @@ def main(argv: list[str] | None = None) -> int:
         proposal = build_audit_proposal(args.bib, args.pdf_dir, strict_all=args.all)
         args.output.write_text(
             json.dumps(proposal, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+    elif args.command == "verify-existing":
+        report = verify_existing_entries(args.bib)
+        args.output.write_text(
+            json.dumps(report, indent=2, sort_keys=True, ensure_ascii=False) + "\n",
             encoding="utf-8",
         )
     return 0

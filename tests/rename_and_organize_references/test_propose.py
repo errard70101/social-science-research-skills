@@ -556,7 +556,7 @@ def test_propose_cli_offline_dispatches_without_openalex(
     output = tmp_path / "proposal.json"
     calls = []
 
-    def fake_propose(directory, destination, *, provider):
+    def fake_propose(directory, destination, *, provider, fmt=None):
         calls.append((directory, destination, provider))
         return {}
 
