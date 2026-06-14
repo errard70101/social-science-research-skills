@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.0] - 2026-06-14
+
+### Added
+- **`manage-latex-bibliography`** gains an `audit` subcommand that cross-checks the `.bib` against a PDF directory, with a `--all` strict-initialization mode.
+- **`manage-latex-bibliography`** gains a `verify-existing` subcommand: cross-checks every existing `.bib` entry's DOI, title, and year against Crossref and emits a Metadata Inconsistency Report. Gracefully degrades to `unverified` when the source is unreachable. (#3)
+- **`rename-and-organize-references`** `propose` accepts `--template`, `--transform` (`none`/`lowercase`/`kebab-case`/`snake_case`), and `--separator` flags so projects can override the default `Authors_Year_Title` convention. (#3)
+- **Inter-skill dependency contract**: `SKILL.md` frontmatter supports inline-array `requires:` and `capabilities:`; `scripts/install.py` resolves dependencies transitively and warns on missing capability providers rather than crashing. New doc `docs/architecture-dependencies.md`. (#4)
+
+### Changed
+- Parent skills (`manage-latex-bibliography`, `rename-and-organize-references`) now request the abstract `literature-search` capability instead of naming specific search skills, and instruct agents to tag `[UNVERIFIED]` rather than fabricate metadata when no provider is installed.
+
 ## [0.1.0] - 2026-06-14
 
 ### Added
