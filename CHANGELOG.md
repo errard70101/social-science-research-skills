@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.1] - 2026-06-14
+
+### Fixed
+- **`summarize-academic-paper`**: Offloaded extracted pages into a separate `.pages.jsonl` file to bound the `extract.json` artifact size (schema bumped to v2).
+- **`summarize-academic-paper`**: Used content-addressed filenames (SHA256) for PDF downloads to prevent duplicates.
+- **`summarize-academic-paper`**: Added fallback checks for `%PDF-` magic bytes when validating PDF responses.
+- **`summarize-academic-paper`**: Updated template to use safer default `plainnat` and clarified "page-snapshot" mode instructions.
+
 ## [0.2.0] - 2026-06-14
 
 ### Added
