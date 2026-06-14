@@ -1,6 +1,7 @@
 ---
 name: manage-latex-bibliography
 description: Use when a LaTeX project needs a new or updated BibTeX bibliography, missing citation entries, verified metadata, headline-style titles, or optional AEA bibliography-style setup.
+requires: [literature-search]
 ---
 
 # Manage LaTeX Bibliography
@@ -63,7 +64,7 @@ description: Use when a LaTeX project needs a new or updated BibTeX bibliography
 
 5. Review missing citation keys and inspect prose for likely uncited works.
    Never treat a citation key or prose mention as proof of publication identity.
-6. Research each candidate according to `references/verification-rules.md`. You MUST use an available literature search skill (e.g., literature-search-repec or literature-search-openalex) to retrieve the ground truth metadata.
+6. Research each candidate according to `references/verification-rules.md`. Use any available skill that provides the `literature-search` capability (e.g., literature-search-repec, literature-search-openalex) to retrieve the ground-truth metadata. If no such skill is installed, fall back to the `verify-existing` Crossref path or tag the entry `[UNVERIFIED]` and notify the user rather than fabricating metadata. See `docs/architecture-dependencies.md` for the graceful-degradation contract.
 7. Give each candidate and its evidence to an independent subagent for a fresh
    online check. If subagents are unavailable, perform a separate second lookup
    without relying on first-pass conclusions.

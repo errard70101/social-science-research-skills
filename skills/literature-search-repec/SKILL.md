@@ -1,6 +1,7 @@
 ---
 name: literature-search-repec
 description: Search the RePEc (Research Papers in Economics) database via IDEAS. Use when searching for economics working papers (NBER, CEPR, SSRN economics), academic journal articles, or specific economic authors/topics.
+capabilities: [literature-search]
 ---
 
 # Literature Search: RePEc (IDEAS)

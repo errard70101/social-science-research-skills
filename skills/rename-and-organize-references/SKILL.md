@@ -1,6 +1,7 @@
 ---
 name: rename-and-organize-references
 description: Use when academic paper PDFs, appendices, slides, or replication materials need consistent author-year-title filenames and a reviewed, safe reorganization plan.
+requires: [literature-search]
 ---
 
 # Rename and Organize References
@@ -72,7 +73,7 @@ more authors, use the first family name followed by `_et_al`.
 ## Safety Rules
 
 - Never run `apply` on an unreviewed proposal.
-- Never invent an author, publication year, or title. You MUST use an available literature search skill (e.g., literature-search-repec or literature-search-openalex) to retrieve the ground truth if metadata is missing.
+- Never invent an author, publication year, or title. Use any available skill that provides the `literature-search` capability (e.g., literature-search-repec, literature-search-openalex) to retrieve the ground truth if metadata is missing. If no such skill is installed, leave the item in `unresolved` and ask the user — never fabricate metadata. See `docs/architecture-dependencies.md`.
 - Treat unresolved metadata and title-search matches as review items.
 - Do not bypass collision, containment, or duplicate-operation failures.
 - Warn that renaming replication directories can break hard-coded paths inside
