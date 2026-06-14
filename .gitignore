@@ -12,3 +12,19 @@ build/
 .worktrees/
 docs/superpowers/
 .skill-workflow-runs/
+
+# AI & Plugin configs
+.claude/
+plugin.json
+.gemini/
+
+# Linter & Caches
+.ruff_cache/
+
+# Scratch & Diff files
+*.diff
+*.patch
+
+# IDEs
+.vscode/
+.idea/
