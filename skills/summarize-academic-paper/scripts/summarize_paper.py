@@ -106,9 +106,9 @@ def _rewrite_known_url(url: str) -> tuple[str, str | None]:
 
 
 def _is_pdf_response(response) -> bool:
-    return (
-        response.headers.get("content-type", "").split(";", 1)[0].strip().lower()
-        == "application/pdf"
+    content_type = response.headers.get("content-type", "").strip().lower()
+    return content_type.startswith("application/pdf") or (
+        response.content[:5] == b"%PDF-"
     )
 
 

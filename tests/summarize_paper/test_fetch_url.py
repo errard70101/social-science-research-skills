@@ -63,6 +63,82 @@ def test_generic_pdf_url_is_downloaded(summary_module, tmp_path: Path):
     assert result["sha256"] == summary_module._sha256_bytes(pdf_bytes)
 
 
+def test_pdf_magic_header_is_accepted_for_octet_stream(
+    summary_module, tmp_path: Path
+):
+    pdf_bytes = b"%PDF-1.7 octet-stream stub"
+    url = "https://example.org/download"
+    client = FakeClient(
+        {
+            url: FakeResponse(
+                status_code=200,
+                headers={"content-type": "application/octet-stream"},
+                content=pdf_bytes,
+                url=url,
+            ),
+        }
+    )
+
+    result = summary_module.resolve_input(
+        url,
+        output_dir=tmp_path,
+        http_client_factory=lambda: client,
+    )
+
+    saved = Path(result["pdf_path"])
+    assert saved.exists()
+    assert saved.read_bytes() == pdf_bytes
+
+
+def test_application_pdf_content_type_is_accepted(summary_module, tmp_path: Path):
+    pdf_bytes = b"response body without a PDF magic header"
+    url = "https://example.org/header-only.pdf"
+    client = FakeClient(
+        {
+            url: FakeResponse(
+                status_code=200,
+                headers={"content-type": "application/pdf"},
+                content=pdf_bytes,
+                url=url,
+            ),
+        }
+    )
+
+    result = summary_module.resolve_input(
+        url,
+        output_dir=tmp_path,
+        http_client_factory=lambda: client,
+    )
+
+    saved = Path(result["pdf_path"])
+    assert saved.exists()
+    assert saved.read_bytes() == pdf_bytes
+
+
+def test_html_without_pdf_magic_header_is_rejected(summary_module, tmp_path: Path):
+    url = "https://example.org/not-a-pdf"
+    client = FakeClient(
+        {
+            url: FakeResponse(
+                status_code=200,
+                headers={"content-type": "text/html"},
+                content=b"<html>not a PDF</html>",
+                url=url,
+            ),
+        }
+    )
+
+    result = summary_module.resolve_input(
+        url,
+        output_dir=tmp_path,
+        http_client_factory=lambda: client,
+    )
+
+    assert result["pdf_path"] is None
+    assert result["unresolved"]
+    assert list(tmp_path.glob("*.pdf")) == []
+
+
 def test_arxiv_abs_url_is_rewritten_to_pdf(summary_module, tmp_path: Path):
     pdf_bytes = b"%PDF-1.4 arxiv stub"
     client = FakeClient(
