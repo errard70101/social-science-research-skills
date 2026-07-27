@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.2.2] - 2026-07-27
+
+Audit pass over the skill surface. Every finding was a skill instructing an
+agent to do something the code could not do, or restating a rule that lived
+somewhere else.
+
+### Fixed
+- **`literature-search-repec`**, **`implement-review-fix-workflow`**: `SKILL.md` used `$SKILL_DIR` without ever telling the agent to assign it, so every documented command ran against an empty path. All five skills now define it before first use.
+- **`manage-latex-bibliography`**: `SKILL.md` documented an `update-entry` subcommand that argparse never registered; the call failed with `invalid choice`. Editing a proposal entry in place and re-running `validate` replaces it.
+- **`scripts/install.py`**: skill installs copied `__pycache__` and stale bytecode into the client skill directories. `copytree` now excludes `__pycache__` and `*.py[cod]`.
+- **`summarize-academic-paper`**: the citation-key convention was named `authorYearFirstWord` here and `authorYearFirstTitleWord` in `manage-latex-bibliography`, which owns the actual rules. Both documents now point at the canonical `Entry Rules` section.
+- **README**: described the `render` extra as producing cropped headline visuals; image mode emits a page-level snapshot, as `SKILL.md` has said since c7187b5.
+
+### Changed
+- **`manage-latex-bibliography`**: replaced the unconditional five-mode "STOP AND ASK" menu with named operations the agent selects directly, asking only when the request is genuinely ambiguous. The menu text was also hardcoded Traditional Chinese while every other skill is English.
+- **`literature-search-repec`**: removed an empty `## Workflow` heading and a "Synergy with other skills" section that restated the `requires:`/`capabilities:` frontmatter contract.
+- All five skills now ship `agents/openai.yaml`; previously two of them did not.
+- `CONTRIBUTING.md` records that `AGENTS.md` is canonical and `CLAUDE.md` / `GEMINI.md` must stay byte-identical.
+
+### Added
+- Structure tests discover skills from the `skills/` directory and derive each skill's bundled files from its `SKILL.md`, instead of a hardcoded whitelist a new skill could silently escape.
+- New guard parses every `$SKILL_DIR/scripts/*.py <subcommand>` invocation out of each `SKILL.md` and asserts argparse accepts it — 12 subcommands across three skills.
+- Regression tests for `SKILL_DIR` ordering, bytecode exclusion, client-instruction-file synchronization, and each documentation fix above. Suite grew from 345 to 370 tests.
+
 ## [0.2.1] - 2026-06-14
 
 ### Fixed
