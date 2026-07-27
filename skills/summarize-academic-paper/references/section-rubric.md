@@ -36,9 +36,10 @@ Section bodies are inserted into the template verbatim, so they are
 LaTeX-as-typed. Use this freedom for citations and math, but escape any
 literal special characters that you mean as plain text:
 
-- Citations: write `{{authorYearFirstWord}}` for inline references; the
-  renderer expands these to `\citep{...}`. Raw `\cite{...}` calls are also
-  honored.
+- Citations: write `{{citation_key}}` for inline references; the renderer
+  expands these to `\citep{...}`. Raw `\cite{...}` calls are also honored.
+  Choose each key according to the canonical convention in the `Entry Rules`
+  section of `manage-latex-bibliography`; do not define a local variant.
 - Math: wrap with `$...$` or `$$...$$` as usual.
 - Plain-text specials: escape `%` as `\%`, `&` as `\&`, `_` as `\_`,
   `#` as `\#`, and `$` as `\$` when you mean a literal character (for
@@ -94,9 +95,9 @@ either confirms or qualifies it. Inline page references for each number.
 
 One paragraph placing the paper among the two or three predecessors it
 explicitly engages with in its related-work or introduction sections. Use
-`\cite{}` calls with keys following the `authorYearFirstWord` convention.
-When no clear predecessor is identifiable, this section is prose-only and
-`predecessor_citations` is empty.
+`\cite{}` calls with keys selected according to the `Entry Rules` section of
+`manage-latex-bibliography`. When no clear predecessor is identifiable, this
+section is prose-only and `predecessor_citations` is empty.
 
 ### Limitations
 

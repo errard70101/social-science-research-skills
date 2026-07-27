@@ -8,24 +8,31 @@ requires: [literature-search]
 
 ## Workflow
 
-1. **STOP AND ASK THE USER:** "請問您這次需要執行哪一種文獻管理模式？請選擇："
-   - **0. Initialize (首次深度健檢)**: Forces every `.bib` entry to be verified online. (Command: `audit --all`)
-   - **1. Scan (文獻補漏)**: Checks `.tex` vs `.bib` for missing keys. (Command: `scan`)
-   - **2. Audit (日常 PDF 雙向稽核)**: Checks `.bib` vs `references/` for missing PDFs. (Command: `audit`)
-   - **3. Update (單點強制更新)**: Forces update on a specific key. (Command: `update-entry`)
-   - **4. Verify Existing (現有條目元資料對帳)**: Cross-checks every existing `.bib` entry against Crossref for DOI, title, and year drift. (Command: `verify-existing`)
-2. Confirm the project root, the main `.tex` file, or the `references.bib` file.
-3. Locate this skill directory and assign its absolute path to `SKILL_DIR`.
-4. Based on the selected mode, generate the proposal without modifying the project:
+1. Infer the operation from the request and available files:
+   - **Scan** checks `.tex` files against the bibliography for missing keys.
+   - **Audit** checks the bibliography against the reference PDF directory.
+   - **Initialize** runs `audit --all` to verify every bibliography entry; use
+     it only when the user explicitly requests initial or full verification.
+   - **Verify existing** checks existing entries against Crossref for DOI,
+     title, and year drift.
+   - **Update one entry** revises a specific key in an existing proposal.
 
-   **Mode 1 (Scan):**
+   When the request clearly identifies one operation, proceed without asking.
+   Ask one concise clarification only when the operation or required scope
+   cannot be inferred.
+2. Confirm only the inputs required for that operation: the project root, main
+   `.tex` file, `references.bib`, reference PDF directory, or proposal file.
+3. Locate this skill directory and assign its absolute path to `SKILL_DIR`.
+4. Run the inferred operation without modifying the project:
+
+   **Scan:**
    ```bash
    python "$SKILL_DIR/scripts/manage_bibliography.py" scan \
      --project /path/to/project \
      --output /path/to/project/bibliography-proposal.json
    ```
 
-   **Mode 0 (Initialize):**
+   **Initialize:**
    ```bash
    python "$SKILL_DIR/scripts/manage_bibliography.py" audit \
      --bib /path/to/project/references.bib \
@@ -34,7 +41,7 @@ requires: [literature-search]
      --all
    ```
 
-   **Mode 2 (Audit):**
+   **Audit:**
    ```bash
    python "$SKILL_DIR/scripts/manage_bibliography.py" audit \
      --bib /path/to/project/references.bib \
@@ -42,7 +49,7 @@ requires: [literature-search]
      --output /path/to/project/bibliography-proposal.json
    ```
 
-   **Mode 4 (Verify Existing):**
+   **Verify existing:**
    ```bash
    python "$SKILL_DIR/scripts/manage_bibliography.py" verify-existing \
      --bib /path/to/project/references.bib \
@@ -53,7 +60,7 @@ requires: [literature-search]
    or `skipped` status. If Crossref is unreachable, entries gracefully degrade
    to `unverified` so the workflow does not crash.
 
-   **Mode 3 (Update):**
+   **Update one entry:**
    ```bash
    python "$SKILL_DIR/scripts/manage_bibliography.py" update-entry \
      --proposal /path/to/project/bibliography-proposal.json \

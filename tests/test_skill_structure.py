@@ -107,6 +107,42 @@ def test_client_instruction_files_stay_in_sync():
 
 
 SUMMARY_SKILL = ROOT / "skills" / "summarize-academic-paper"
+BIBLIOGRAPHY_SKILL = ROOT / "skills" / "manage-latex-bibliography"
+
+
+def test_readme_describes_headline_visuals_as_page_snapshots():
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    assert "Optional cropped headline visuals" not in readme
+    assert "Optional page-snapshot headline visuals" in readme
+
+
+def test_summary_points_to_canonical_bibliography_citation_key_rules():
+    summary_docs = [
+        (SUMMARY_SKILL / "SKILL.md").read_text(encoding="utf-8"),
+        (SUMMARY_SKILL / "references" / "section-rubric.md").read_text(
+            encoding="utf-8"
+        ),
+    ]
+    bibliography = (BIBLIOGRAPHY_SKILL / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "authorYearFirstTitleWord" in bibliography
+    for text in summary_docs:
+        assert "authorYearFirstWord" not in text
+        assert "authorYearFirstTitleWord" not in text
+        assert "manage-latex-bibliography" in text
+        assert "Entry Rules" in text
+
+
+def test_bibliography_infers_clear_operation_without_forced_menu():
+    text = (BIBLIOGRAPHY_SKILL / "SKILL.md").read_text(encoding="utf-8")
+
+    assert "STOP AND ASK" not in text
+    assert not re.search(r"[\u4e00-\u9fff]", text)
+    assert (
+        "When the request clearly identifies one operation, proceed without asking."
+        in text
+    )
 
 
 def test_summary_skill_template_exists_and_has_slots():

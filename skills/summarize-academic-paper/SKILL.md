@@ -43,9 +43,10 @@ description: Use when preparing for or hosting an academic seminar and you need 
    Draft each section from the extracted text; never rely on training
    knowledge for facts about the paper. Pick at most one headline visual
    from `table_candidates`, preferring the table or figure the paper itself
-   flags as central. Generate predecessor citation keys following the
-   `authorYearFirstWord` rule used by `manage-latex-bibliography`. Write the
-   content JSON to `<work-dir>/summarize-paper-content.json`.
+   flags as central. Generate predecessor citation keys according to the
+   canonical convention in the `Entry Rules` section of
+   `manage-latex-bibliography`; do not define a local variant. Write the content
+   JSON to `<work-dir>/summarize-paper-content.json`.
 
 6. Render the LaTeX summary:
 

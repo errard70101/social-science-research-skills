@@ -67,7 +67,7 @@ Runtime dependencies:
 python -m pip install "pypdf>=5.0" "httpx>=0.27"
 ```
 
-Optional cropped headline visuals require the `render` extra:
+Optional page-snapshot headline visuals require the `render` extra:
 
 ```bash
 python -m pip install '.[render]'
