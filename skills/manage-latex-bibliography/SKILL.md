@@ -15,7 +15,9 @@ requires: [literature-search]
      it only when the user explicitly requests initial or full verification.
    - **Verify existing** checks existing entries against Crossref for DOI,
      title, and year drift.
-   - **Update one entry** revises a specific key in an existing proposal.
+
+   To revise a single entry, edit its object in the generated proposal JSON
+   directly, then re-run `validate`.
 
    When the request clearly identifies one operation, proceed without asking.
    Ask one concise clarification only when the operation or required scope
@@ -59,15 +61,6 @@ requires: [literature-search]
    The report lists each entry with `verified`, `inconsistent`, `unverified`,
    or `skipped` status. If Crossref is unreachable, entries gracefully degrade
    to `unverified` so the workflow does not crash.
-
-   **Update one entry:**
-   ```bash
-   python "$SKILL_DIR/scripts/manage_bibliography.py" update-entry \
-     --proposal /path/to/project/bibliography-proposal.json \
-     --key <citation_key> \
-     --entry-type <type> \
-     --fields <json_fields_string>
-   ```
 
 5. Review missing citation keys and inspect prose for likely uncited works.
    Never treat a citation key or prose mention as proof of publication identity.

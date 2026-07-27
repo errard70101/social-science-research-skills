@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -8,6 +10,35 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 SKILLS_ROOT = ROOT / "skills"
 SKILLS = sorted(path.name for path in SKILLS_ROOT.iterdir() if path.is_dir())
+
+# A bare kebab-case token right after the script path is a subcommand. Quoted
+# tokens are positional arguments and tokens starting with "-" are options.
+DOCUMENTED_SUBCOMMAND = re.compile(
+    r"\$SKILL_DIR/(scripts/[A-Za-z0-9_.-]+\.py)\"\s+([a-z][a-z0-9-]*)"
+)
+
+
+def documented_subcommands(name: str) -> dict[str, set[str]]:
+    """Map script path -> subcommands the skill's SKILL.md tells agents to run."""
+    text = (ROOT / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
+    found: dict[str, set[str]] = {}
+    for script, subcommand in DOCUMENTED_SUBCOMMAND.findall(text):
+        found.setdefault(script, set()).add(subcommand)
+    return found
+
+
+def cli_subcommands(script: Path) -> set[str]:
+    """Return the subcommands argparse actually accepts, from --help."""
+    result = subprocess.run(
+        [sys.executable, str(script), "--help"],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stderr
+    usage = result.stdout.split("positional arguments:")[0]
+    choices = re.search(r"\{([a-z0-9,-]+)\}", usage)
+    return set(choices.group(1).split(",")) if choices else set()
 
 
 def test_structure_checks_cover_every_discovered_skill(install_module):
@@ -80,6 +111,21 @@ def test_skill_defines_skill_dir_before_using_it(name):
     assignment = "assign its absolute path to `SKILL_DIR`"
     assert assignment in text
     assert text.index(assignment) < text.index("$SKILL_DIR/")
+
+
+@pytest.mark.parametrize("name", SKILLS)
+def test_documented_subcommands_exist_in_the_cli(name):
+    """SKILL.md must never instruct an agent to run a subcommand argparse rejects."""
+    documented = documented_subcommands(name)
+    if not documented:
+        pytest.skip(f"{name} documents no subcommands")
+
+    for script, subcommands in documented.items():
+        accepted = cli_subcommands(ROOT / "skills" / name / script)
+        assert subcommands <= accepted, (
+            f"{name}/{script} documents {sorted(subcommands - accepted)} "
+            f"but the CLI accepts {sorted(accepted)}"
+        )
 
 
 @pytest.mark.parametrize("name", SKILLS)
