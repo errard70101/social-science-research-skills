@@ -17,11 +17,13 @@ methodology. OpenCode agents are optional interactive fallback only.
 ## Workflow
 
 1. Read `references/prompt-contracts.md`.
-2. Start with dry-run prompt generation and stub commands.
-3. Do not use real Codex, Antigravity, or other CLI orchestration until dry-run,
+2. Locate this skill directory, assign its absolute path to `SKILL_DIR`, and
+   invoke the bundled runner through that variable.
+3. Start with dry-run prompt generation and stub commands.
+4. Do not use real Codex, Antigravity, or other CLI orchestration until dry-run,
    report validation, stub workflow, and loop tests pass.
-4. Store workflow artifacts under `.skill-workflow-runs/`.
-5. Require every implementer and reviewer report to include `## Skills used`.
+5. Store workflow artifacts under `.skill-workflow-runs/`.
+6. Require every implementer and reviewer report to include `## Skills used`.
 
 ## Runner
 

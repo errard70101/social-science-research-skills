@@ -11,6 +11,7 @@ capabilities: [literature-search]
 ## Usage Instructions
 
 This skill provides two primary capabilities: Searching for papers and Fetching Citation Counts.
+Before running a bundled script, locate this skill directory, assign its absolute path to `SKILL_DIR`, and invoke the script through that variable.
 
 ### 1. Searching for Papers
 

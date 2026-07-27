@@ -168,7 +168,11 @@ def install_skill(
     if link:
         target.symlink_to(skill.resolve(), target_is_directory=True)
     else:
-        shutil.copytree(skill, target)
+        shutil.copytree(
+            skill,
+            target,
+            ignore=shutil.ignore_patterns("__pycache__", "*.py[cod]"),
+        )
 
 
 def build_parser() -> argparse.ArgumentParser:

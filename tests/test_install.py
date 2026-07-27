@@ -34,6 +34,27 @@ def test_copy_install_replaces_only_selected_skill(install_module, tmp_path):
     assert (unrelated / "SKILL.md").read_text() == "keep"
 
 
+def test_copy_install_excludes_python_bytecode_caches(install_module, tmp_path):
+    repo = tmp_path / "repo"
+    skill = make_skill(repo)
+    scripts = skill / "scripts"
+    cache = scripts / "__pycache__"
+    cache.mkdir(parents=True)
+    (scripts / "runner.py").write_text("print('run')\n")
+    (cache / "runner.cpython-312.pyc").write_bytes(b"cached")
+    (scripts / "stale.pyc").write_bytes(b"stale")
+    (scripts / "stale.pyo").write_bytes(b"optimized")
+    destination = tmp_path / "installed"
+
+    install_module.install_skill(skill, destination, link=False, dry_run=False)
+
+    installed_scripts = destination / "example-skill" / "scripts"
+    assert (installed_scripts / "runner.py").is_file()
+    assert not (installed_scripts / "__pycache__").exists()
+    assert not (installed_scripts / "stale.pyc").exists()
+    assert not (installed_scripts / "stale.pyo").exists()
+
+
 def test_link_install_creates_symlink(install_module, tmp_path):
     repo = tmp_path / "repo"
     skill = make_skill(repo)

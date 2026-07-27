@@ -66,6 +66,18 @@ def test_skill_references_existing_bundled_files(name, expected):
     assert all((skill / value).is_file() for value in expected)
 
 
+@pytest.mark.parametrize(
+    "name",
+    ["implement-review-fix-workflow", "literature-search-repec"],
+)
+def test_skill_defines_skill_dir_before_using_it(name):
+    text = (ROOT / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
+
+    assignment = "assign its absolute path to `SKILL_DIR`"
+    assert assignment in text
+    assert text.index(assignment) < text.index("$SKILL_DIR/")
+
+
 SUMMARY_SKILL = ROOT / "skills" / "summarize-academic-paper"
 
 
