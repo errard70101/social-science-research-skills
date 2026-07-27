@@ -1,0 +1,4 @@
+interface:
+  display_name: "Implement, Review, Fix Workflow"
+  short_description: "Run a guarded implementation and review loop"
+  default_prompt: "Use $implement-review-fix-workflow to implement and review changes to <target files> with the bundled dry-run-first workflow."

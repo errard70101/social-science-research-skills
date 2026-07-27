@@ -6,8 +6,6 @@ capabilities: [literature-search]
 
 # Literature Search: RePEc (IDEAS)
 
-## Workflow
-
 ## Usage Instructions
 
 This skill provides two primary capabilities: Searching for papers and Fetching Citation Counts.
@@ -50,12 +48,6 @@ Use Python 3.10 or newer. It requires `httpx` and `beautifulsoup4`.
 ```bash
 python -m pip install httpx beautifulsoup4
 ```
-
-## Synergy with other skills (AI Operating Guidelines)
-
-- **When renaming PDFs (`rename-and-organize-references`)**: If you need to accurately identify a poorly named economics paper, use this skill to fetch the correct Author, Year, and Title first.
-- **When updating LaTeX (`manage-latex-bibliography`)**: If you need to find the correct citation or BibTeX metadata for an economics paper, use this skill to find the IDEAS page, from which authoritative metadata can be extracted.
-- **When Snowballing**: If you need to perform massive citation network traversal, use this skill to precisely locate the target paper first, then pass its title/ID to an available citation-network skill such as `literature-search-openalex` when that skill is installed.
 
 ## Use Cases
 - Finding the most recent working papers (e.g., NBER, CEPR, IZA).

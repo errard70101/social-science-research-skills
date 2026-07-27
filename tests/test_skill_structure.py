@@ -6,30 +6,12 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
-SKILLS = {
-    "rename-and-organize-references": [
-        "scripts/rename_references.py",
-        "references/mapping-format.md",
-    ],
-    "manage-latex-bibliography": [
-        "scripts/manage_bibliography.py",
-        "references/verification-rules.md",
-        "references/title-case-rules.md",
-    ],
-    "summarize-academic-paper": [
-        "scripts/summarize_paper.py",
-        "references/section-rubric.md",
-        "references/input-sources.md",
-    ],
-    "implement-review-fix-workflow": [
-        "scripts/implement_review_fix_workflow.py",
-        "references/prompt-contracts.md",
-    ],
-    "literature-search-repec": [
-        "scripts/search_repec.py",
-        "scripts/get_citations.py",
-    ],
-}
+SKILLS_ROOT = ROOT / "skills"
+SKILLS = sorted(path.name for path in SKILLS_ROOT.iterdir() if path.is_dir())
+
+
+def test_structure_checks_cover_every_discovered_skill(install_module):
+    assert install_module.discover_skills() == SKILLS
 
 
 @pytest.mark.parametrize("name", SKILLS)
@@ -58,24 +40,70 @@ def test_skill_contains_no_machine_specific_paths(name):
     assert all(value not in text for value in forbidden)
 
 
-@pytest.mark.parametrize(("name", "expected"), SKILLS.items())
-def test_skill_references_existing_bundled_files(name, expected):
+@pytest.mark.parametrize("name", SKILLS)
+def test_skill_references_existing_bundled_files(name):
     skill = ROOT / "skills" / name
     text = (skill / "SKILL.md").read_text(encoding="utf-8")
-    assert all(value in text for value in expected)
-    assert all((skill / value).is_file() for value in expected)
+    references = set(re.findall(r"\$SKILL_DIR/(scripts/[A-Za-z0-9_.-]+)", text))
+    references.update(re.findall(r"`(references/[A-Za-z0-9_.-]+)`", text))
+
+    assert references
+    assert all((skill / path).is_file() for path in references)
 
 
-@pytest.mark.parametrize(
-    "name",
-    ["implement-review-fix-workflow", "literature-search-repec"],
-)
+@pytest.mark.parametrize("name", SKILLS)
+def test_skill_has_openai_interface_metadata(name):
+    metadata = ROOT / "skills" / name / "agents" / "openai.yaml"
+
+    assert metadata.is_file()
+    text = metadata.read_text(encoding="utf-8")
+    display_name = re.search(r'^  display_name: "(.+)"$', text, re.MULTILINE)
+    short_description = re.search(
+        r'^  short_description: "(.+)"$', text, re.MULTILINE
+    )
+    default_prompt = re.search(r'^  default_prompt: "(.+)"$', text, re.MULTILINE)
+
+    assert display_name
+    assert short_description
+    assert 25 <= len(short_description.group(1)) <= 64
+    assert default_prompt
+    assert f"${name}" in default_prompt.group(1)
+
+
+@pytest.mark.parametrize("name", SKILLS)
 def test_skill_defines_skill_dir_before_using_it(name):
     text = (ROOT / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
+
+    if "$SKILL_DIR/" not in text:
+        pytest.skip(f"{name} does not use SKILL_DIR")
 
     assignment = "assign its absolute path to `SKILL_DIR`"
     assert assignment in text
     assert text.index(assignment) < text.index("$SKILL_DIR/")
+
+
+@pytest.mark.parametrize("name", SKILLS)
+def test_skill_has_no_empty_second_level_section(name):
+    text = (ROOT / "skills" / name / "SKILL.md").read_text(encoding="utf-8")
+
+    assert not re.search(r"^## [^\n]+\n\s*^## ", text, re.MULTILINE)
+
+
+def test_repec_skill_omits_redundant_synergy_section():
+    text = (
+        ROOT / "skills" / "literature-search-repec" / "SKILL.md"
+    ).read_text(encoding="utf-8")
+
+    assert "## Synergy with other skills" not in text
+
+
+def test_client_instruction_files_stay_in_sync():
+    paths = [ROOT / name for name in ("AGENTS.md", "CLAUDE.md", "GEMINI.md")]
+    contents = {path.read_bytes() for path in paths}
+    contributing = (ROOT / "CONTRIBUTING.md").read_text(encoding="utf-8")
+
+    assert len(contents) == 1
+    assert "`AGENTS.md` is the canonical client instruction file" in contributing
 
 
 SUMMARY_SKILL = ROOT / "skills" / "summarize-academic-paper"

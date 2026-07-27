@@ -1,0 +1,4 @@
+interface:
+  display_name: "Literature Search: RePEc"
+  short_description: "Search RePEc papers and citation counts"
+  default_prompt: "Use $literature-search-repec to find economics papers on <topic or author> and retrieve citation counts for the strongest candidates."

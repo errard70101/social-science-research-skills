@@ -11,6 +11,13 @@ This repository relies on Agentic CI/CD. Do not manually hack skill scripts with
 - **Linting**: Ensure code complies with formatting rules by running `python -m ruff check .`.
 - **Zero-Trust for Dependencies**: Always favor graceful degradation if external skills (e.g., OpenAlex) are unavailable. Fail gracefully instead of crashing.
 
+### Client instruction files
+
+`AGENTS.md` is the canonical client instruction file. Keep `CLAUDE.md` and
+`GEMINI.md` byte-for-byte identical whenever the instructions change. They
+remain regular files, rather than symbolic links, for portable multi-client
+clones; the test suite enforces synchronization.
+
 ## 2. Release SOP (Standard Operating Procedure)
 
 We strictly follow [Semantic Versioning (SemVer)](https://semver.org/). Version numbers should only be bumped when explicitly deciding to "cut a release."
