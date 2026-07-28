@@ -17,20 +17,25 @@ It addresses the three concerns raised in issue #4:
 ---
 name: example-skill
 description: ...
-requires: [literature-search]
-capabilities: [literature-search]
+metadata:
+  requires: [literature-search]
+  capabilities: [literature-search]
 ---
 ```
 
-- `requires:` — a list of either **skill names** (`literature-search-repec`) or
-  **capability names** (`literature-search`). A skill name resolves to that
-  specific skill; a capability name resolves to any installed skill that
-  advertises the capability.
-- `capabilities:` — a list of abstract capabilities the skill provides. Other
-  skills can request the capability rather than naming this skill directly.
+- `metadata.requires:` — a list of either **skill names**
+  (`literature-search-repec`) or **capability names** (`literature-search`). A
+  skill name resolves to that specific skill; a capability name resolves to
+  any installed skill that advertises the capability.
+- `metadata.capabilities:` — a list of abstract capabilities the skill
+  provides. Other skills can request the capability rather than naming this
+  skill directly.
 
-Both fields use inline-array syntax (`[a, b, c]`). The installer parses them
-without an external YAML dependency.
+Both fields use inline-array syntax (`[a, b, c]`) and are nested under the
+standard `metadata` frontmatter key so official skill validators accept them.
+The installer parses them without an external YAML dependency. It also
+continues to recognize the repository's earlier top-level form for backward
+compatibility.
 
 ## 2. Installer behavior
 

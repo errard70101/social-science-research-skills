@@ -1,0 +1,4 @@
+interface:
+  display_name: "Manage Zotero Library"
+  short_description: "Plan and safely apply approved Zotero organization changes"
+  default_prompt: "Use $manage-zotero-library to propose safe changes to my Zotero tags and collections, then apply only the changes I explicitly approve."

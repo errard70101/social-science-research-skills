@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 
 def _write_skill(root, name, *, requires=None, capabilities=None):
     skill = root / "skills" / name
@@ -22,6 +24,34 @@ def test_parse_frontmatter_parses_inline_list(install_module, tmp_path):
     assert metadata["requires"] == ["beta", "gamma"]
     assert metadata["capabilities"] == ["search"]
     assert metadata["name"] == "alpha"
+
+
+def test_parse_frontmatter_reads_dependency_fields_nested_in_metadata(
+    install_module,
+    tmp_path,
+):
+    skill = tmp_path / "skills" / "alpha"
+    skill.mkdir(parents=True)
+    (skill / "SKILL.md").write_text(
+        "\n".join(
+            [
+                "---",
+                "name: alpha",
+                "description: Use when testing.",
+                "metadata:",
+                "  requires: [beta]",
+                "  capabilities: [search]",
+                "---",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    metadata = install_module.parse_frontmatter(skill / "SKILL.md")
+
+    assert metadata["requires"] == ["beta"]
+    assert metadata["capabilities"] == ["search"]
 
 
 def test_discover_capabilities_groups_providers(install_module, tmp_path):
@@ -71,4 +101,22 @@ def test_resolve_dependencies_is_idempotent_when_provider_preselected(
         [parent, provider], tmp_path / "skills"
     )
     assert sorted(p.name for p in expanded) == ["parent", "search-a"]
+    assert warnings == []
+
+
+def test_manage_zotero_pulls_in_read_capability_provider(
+    install_module,
+):
+    skills_root = Path(install_module.__file__).resolve().parents[1] / "skills"
+    selected = [skills_root / "manage-zotero-library"]
+
+    expanded, warnings = install_module.resolve_dependencies(
+        selected,
+        skills_root,
+    )
+
+    assert [path.name for path in expanded] == [
+        "manage-zotero-library",
+        "query-zotero-library",
+    ]
     assert warnings == []

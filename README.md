@@ -124,6 +124,26 @@ python -m pip install "pymupdf>=1.24"
 
 This fallback improves text extraction but does not provide OCR.
 
+### `manage-zotero-library`
+
+Safely organizes a researcher's personal Zotero library through the official
+Local API. It prepares reviewable plans for tag and collection-membership
+changes and for creating, renaming, moving, or deleting collections. Writes
+require exact plan approval, current-version checks, and post-write receipts.
+The user can choose one-time authorization or store `Always Allow` securely in
+macOS Keychain, Windows Credential Locker, or a supported Linux secret store.
+Collection deletion additionally requires the target key and never deletes
+library items or attachments.
+
+Installing this skill also installs the `zotero-read` provider used to discover
+exact targets.
+
+Runtime dependency:
+
+```bash
+python -m pip install "httpx>=0.27" "keyring>=25.0"
+```
+
 ### `implement-review-fix-workflow`
 
 An Agentic CI/CD engine that runs a non-interactive implementation and review loop. It coordinates a maker (implementer) and a checker (reviewer) to autonomously develop, refine, and verify repository skills or tasks until they pass review.
