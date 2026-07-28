@@ -98,6 +98,23 @@ Runtime dependencies:
 python -m pip install httpx beautifulsoup4
 ```
 
+### `query-zotero-library`
+
+Searches a researcher's own Zotero library through the official read-only Local
+API, locates local PDF attachments across macOS, Windows, and Linux, and
+extracts relevant pages for source-grounded answers. It requires Zotero Desktop
+to be running with local application access enabled. A project can optionally
+name a preferred Zotero collection in its agent instructions; otherwise the
+skill searches the whole personal library.
+It does not use Zotero Web API keys, third-party Zotero MCP servers, Zotero
+writes, direct SQLite access, or vector indexing.
+
+Runtime dependencies:
+
+```bash
+python -m pip install "httpx>=0.27" "pypdf>=5.0"
+```
+
 ### `implement-review-fix-workflow`
 
 An Agentic CI/CD engine that runs a non-interactive implementation and review loop. It coordinates a maker (implementer) and a checker (reviewer) to autonomously develop, refine, and verify repository skills or tasks until they pass review.
@@ -113,5 +130,4 @@ python -m ruff check .
 Add each canonical skill under `skills/<skill-name>/`. The directory name must
 match the `name` in `SKILL.md`. Keep bundled paths relative and avoid
 client-specific or machine-specific assumptions.
-
 

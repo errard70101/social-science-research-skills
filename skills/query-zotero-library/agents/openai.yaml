@@ -1,0 +1,4 @@
+interface:
+  display_name: "Query Zotero Library"
+  short_description: "Search local Zotero PDFs and answer with evidence"
+  default_prompt: "Use $query-zotero-library to find relevant papers in my local Zotero library and answer my question with source-grounded evidence."
