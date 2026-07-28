@@ -430,12 +430,26 @@ class ManageZotero:
         response = self._request("GET", path)
         return _response_json(response, path)
 
-    def server_id(self) -> str:
+    def planning_context(self) -> dict[str, object]:
+        """Describe whether the running Zotero can apply a generated plan."""
         response = self._request("GET", "")
         server_id = response.headers.get("Zotero-Server-ID", "").strip()
-        if not server_id:
+        write_supported = bool(server_id)
+        return {
+            "server_id": server_id or None,
+            "local_api_write_supported": write_supported,
+            "application_mode": (
+                "local_api" if write_supported else "manual_zotero_desktop"
+            ),
+        }
+
+    def server_id(self) -> str:
+        context = self.planning_context()
+        server_id = context["server_id"]
+        if not isinstance(server_id, str):
             raise ZoteroManagementError(
-                "Zotero Local API did not report Zotero-Server-ID"
+                "This Zotero version exposes a GET-only Local API and does not "
+                "support write authorization"
             )
         return server_id
 
@@ -534,7 +548,7 @@ class ManageZotero:
         if set(added_collection_keys) & set(removed_collection_keys):
             raise ValueError("The same collection cannot be added and removed")
 
-        server_id = self.server_id()
+        planning_context = self.planning_context()
         changes: list[dict[str, object]] = []
         for key in keys:
             record = self._get_item(key)
@@ -598,7 +612,7 @@ class ManageZotero:
                 "schema_version": PLAN_SCHEMA_VERSION,
                 "created_at": _now(),
                 "action": "update_items",
-                "server_id": server_id,
+                **planning_context,
                 "summary": {
                     "changed_item_count": len(changes),
                     "requested_item_count": len(keys),
@@ -643,7 +657,7 @@ class ManageZotero:
         normalized_name = name.strip()
         if not normalized_name:
             raise ValueError("Collection name cannot be blank")
-        server_id = self.server_id()
+        planning_context = self.planning_context()
         collections, response = self._get_collections()
         parent_key = (
             resolve_collection_key(collections, parent) if parent else False
@@ -661,7 +675,7 @@ class ManageZotero:
                 "schema_version": PLAN_SCHEMA_VERSION,
                 "created_at": _now(),
                 "action": "create_collection",
-                "server_id": server_id,
+                **planning_context,
                 "expected_library_version": _response_version(response),
                 "after": {
                     "name": normalized_name,
@@ -681,7 +695,7 @@ class ManageZotero:
         if parent is not None and move_to_root:
             raise ValueError("Choose a parent collection or move to root, not both")
         key = normalize_key(collection_key, kind="collection")
-        server_id = self.server_id()
+        planning_context = self.planning_context()
         collections, _ = self._get_collections()
         records = {
             str(entry["key"]): entry for entry in collections if entry.get("key")
@@ -731,7 +745,7 @@ class ManageZotero:
                 "schema_version": PLAN_SCHEMA_VERSION,
                 "created_at": _now(),
                 "action": "update_collection",
-                "server_id": server_id,
+                **planning_context,
                 "before": before,
                 "after": after,
             }
@@ -849,7 +863,7 @@ class ManageZotero:
         collection_key: str,
     ) -> dict[str, object]:
         key = normalize_key(collection_key, kind="collection")
-        server_id = self.server_id()
+        planning_context = self.planning_context()
         collections, _ = self._get_collections()
         state = self._delete_state(key, collections, self._get_top_items())
         return sign_plan(
@@ -857,7 +871,7 @@ class ManageZotero:
                 "schema_version": PLAN_SCHEMA_VERSION,
                 "created_at": _now(),
                 "action": "delete_collection",
-                "server_id": server_id,
+                **planning_context,
                 **state,
                 "requires_delete_confirmation": key,
             }
@@ -962,6 +976,16 @@ class ManageZotero:
                 "The delete confirmation must exactly match the collection key"
             )
         validate_plan(plan)
+        if (
+            plan.get("application_mode") == "manual_zotero_desktop"
+            or plan.get("local_api_write_supported") is False
+            or not isinstance(plan.get("server_id"), str)
+        ):
+            raise ZoteroManagementError(
+                "This plan was created by a Zotero version with a GET-only "
+                "Local API. Apply it manually in Zotero Desktop; this helper "
+                "will not request authorization or send a write."
+            )
         current_server_id = self.server_id()
         if current_server_id != plan.get("server_id"):
             raise PlanDriftError(

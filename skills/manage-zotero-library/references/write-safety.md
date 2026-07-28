@@ -13,7 +13,22 @@ replace it with ad hoc API calls.
 - Collection and tag behavior:
   <https://www.zotero.org/support/collections_and_tags>
 
-Reads from the loopback Local API need no API key. A write first retrieves
+Current official documentation describes Local API writes, but older installed
+Zotero versions can still expose the earlier GET-only implementation. Every
+response from a write-capable implementation includes `Zotero-Server-ID`, and
+the server ID is required on write requests. The helper therefore uses that
+header as a runtime capability gate rather than assuming documentation and the
+installed application update simultaneously.
+
+When the header is absent, planning remains GET-only and the plan records
+`local_api_write_supported: false` plus
+`application_mode: manual_zotero_desktop`. Applying that plan is blocked before
+authorization or any further HTTP request. The user performs the approved
+change in Zotero Desktop, followed by read-only verification of the exact
+planned keys through the `zotero-read` provider. A manual change has no helper
+receipt or write-authorization mode.
+
+When the header is present, reads need no API key. A write first retrieves the
 `Zotero-Server-ID`, then calls `/api/local/authorize`. The returned key is
 partitioned by that server ID and is never included in plans, receipts, logs,
 or command output.
@@ -80,6 +95,8 @@ reconstruction. It does not claim that deletion can be automatically undone.
 
 ## Failure handling
 
+- Missing `Zotero-Server-ID`: preserve the manual plan, do not request
+  authorization, and route application through Zotero Desktop.
 - Before authorization: stop, prepare a new plan if needed, and make no write.
 - Authorization denied or secure credential storage unavailable: stop without
   retrying.

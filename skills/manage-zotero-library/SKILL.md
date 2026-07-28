@@ -1,6 +1,6 @@
 ---
 name: manage-zotero-library
-description: "Safely organize a user's personal Zotero library through the official Local API by preparing reviewable plans and, only after exact approval, adding or removing tags and collection memberships or creating, renaming, moving, and deleting collections. Also use when a researcher asks how to import a PDF, a folder of PDFs, or a large PDF collection: provide the Desktop-first stored-file workflow documented here, then offer to audit and organize the imported items. Supports user-selected one-time or securely remembered authorization, concurrency checks, delete-specific confirmation, post-write verification, and durable receipts. Never deletes Zotero items or attachments."
+description: "Safely organize a user's personal Zotero library by preparing reviewable plans and, when the running Zotero exposes official Local API write support, applying approved tag, collection-membership, and collection changes. On GET-only Zotero versions, keep planning available but require the user to apply the plan in Zotero Desktop. Also use for Desktop-first PDF import guidance. Supports runtime capability checks, exact approval, concurrency checks, delete-specific confirmation, post-change verification, and durable receipts. Never deletes Zotero items or attachments."
 metadata:
   requires: [zotero-read]
 ---
@@ -10,6 +10,8 @@ metadata:
 Organize the researcher's Zotero library through a strict
 plan-review-approve-apply-verify workflow. Use the read-capability skill to find
 items and collections; use this skill only for approved organization changes.
+The helper detects Local API write support at runtime and never assumes that an
+installed Zotero version has received a newly documented API feature.
 
 Before running the bundled script, locate this skill directory and
 assign its absolute path to `SKILL_DIR`.
@@ -127,6 +129,18 @@ Planning performs only GET requests. If it reports a no-op, ambiguous
 collection, child attachment/note, or more than 50 item updates, stop and
 revise the request rather than bypassing the check.
 
+Inspect these plan fields before presenting an apply path:
+
+- `local_api_write_supported: true` and `application_mode: local_api` mean the
+  running Zotero returned the `Zotero-Server-ID` required by the official local
+  write protocol. Continue with the approval and Local API apply workflow.
+- `local_api_write_supported: false` and
+  `application_mode: manual_zotero_desktop` mean the running Zotero is still
+  GET-only. The plan remains reviewable, but the helper cannot apply it.
+
+Do not infer capability from a Zotero version number or from online
+documentation alone. The current runtime response is authoritative.
+
 ### 3. Review with the user
 
 Show the exact plan ID and a readable summary of every before/after change.
@@ -146,6 +160,15 @@ delete confirmation equal to the target collection key. A general “yes” is
 insufficient.
 
 ### 4. Apply the unchanged plan
+
+For a `manual_zotero_desktop` plan, do **not** run `apply`. Tell the user that
+their current Zotero Local API is GET-only, then have the user perform only the
+approved change in Zotero Desktop. For collection membership removal, use
+**Remove Item(s) from Collection…**, not **Move Item(s) to Trash…**. For
+collection deletion, use **Delete Collection…**, never **Delete Collection and
+Items…**. After the user acts, continue to read-only verification in step 6.
+
+For a `local_api` plan, continue with the commands below.
 
 Before applying, tell the user that Zotero will display an authorization
 dialog when no valid remembered authorization exists. Explain both choices:
@@ -188,6 +211,10 @@ plan and request approval again.
 
 ### 5. Inspect or disable remembered authorization
 
+These commands apply only when the running Zotero supports Local API writes.
+On a GET-only runtime, there can be no local write authorization for this
+helper to inspect or forget.
+
 Check only whether the current Zotero database has a securely stored key:
 
 ```bash
@@ -210,11 +237,19 @@ including reads.
 
 ### 6. Verify and report
 
-The helper re-reads every changed object. Treat the operation as complete only
-when the receipt says `"verified": true`. Report the receipt path, plan ID,
-changed keys, `authorization_mode`, and verification result. A delete receipt
-includes a reconstruction snapshot because deleting a collection is not
-automatically reversible.
+For a `manual_zotero_desktop` plan, wait until the user confirms that the
+Desktop action is complete. Then use the `zotero-read` provider to re-read the
+exact planned item or collection keys and compare the current state with the
+plan. For deletion, confirm that every planned collection is absent and every
+affected item still exists with its planned remaining memberships. Report the
+plan ID, changed keys, `application_mode`, and comparison result. Do not claim
+that the helper produced a receipt or an `authorization_mode` for a manual change.
+
+For a `local_api` plan, the helper re-reads every changed object. Treat the
+operation as complete only when the receipt says `"verified": true`. Report the
+receipt path, plan ID, changed keys, `authorization_mode`, and verification
+result. A delete receipt includes a reconstruction snapshot because deleting a
+collection is not automatically reversible.
 
 If the write succeeded but verification or receipt creation failed, report the
 uncertain state immediately and perform read-only inspection. Never repeat the
@@ -224,6 +259,9 @@ write automatically.
 
 - Keep every request on `http://localhost:23119/api/`; the helper rejects other
   hosts, ports, schemes, and paths.
+- Treat the presence of `Zotero-Server-ID` on the live Local API response as
+  the write-capability gate. A missing header keeps the helper in GET-only
+  planning mode and must stop authorization and apply before any write request.
 - Never print, commit, or place a local API key in a plan, receipt, environment
   file, or repository. One-time keys remain only in process memory; remembered
   keys may be stored only in a recognized system credential store.

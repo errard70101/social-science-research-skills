@@ -134,7 +134,11 @@ This fallback improves text extraction but does not provide OCR.
 Safely organizes a researcher's personal Zotero library through the official
 Local API. It prepares reviewable plans for tag and collection-membership
 changes and for creating, renaming, moving, or deleting collections. Writes
-require exact plan approval, current-version checks, and post-write receipts.
+require runtime confirmation that the installed Zotero exposes the new local
+write protocol, exact plan approval, current-version checks, and post-write
+receipts. On older GET-only Zotero versions, planning still works, but the user
+applies the approved plan in Zotero Desktop and the skill verifies it with
+read-only requests.
 The user can choose one-time authorization or store `Always Allow` securely in
 macOS Keychain, Windows Credential Locker, or a supported Linux secret store.
 Collection deletion additionally requires the target key and never deletes

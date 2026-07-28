@@ -50,6 +50,17 @@ def root_response() -> httpx.Response:
     )
 
 
+def get_only_root_response() -> httpx.Response:
+    return httpx.Response(
+        200,
+        json={"ok": True},
+        headers={
+            "Zotero-API-Version": "3",
+            "X-Zotero-Version": "9.0.6",
+        },
+    )
+
+
 def item(
     key: str,
     *,
@@ -153,6 +164,8 @@ def test_plan_items_merges_tags_and_collection_membership_without_writes(
 
     assert plan["action"] == "update_items"
     assert plan["server_id"] == "SERVER-ONE"
+    assert plan["local_api_write_supported"] is True
+    assert plan["application_mode"] == "local_api"
     assert len(plan["plan_id"]) == 16
     change = plan["changes"][0]
     assert change["before"] == {
@@ -170,6 +183,120 @@ def test_plan_items_merges_tags_and_collection_membership_without_writes(
         "collections": ["CHILD234"],
     }
     assert {request.method for request in requests} == {"GET"}
+
+
+def test_get_only_zotero_still_creates_manual_collection_plan(manager_module):
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/api/":
+            return get_only_root_response()
+        if request.url.path == "/api/users/0/collections":
+            return httpx.Response(
+                200,
+                json=[
+                    collection(
+                        "PARENT23",
+                        version=10,
+                        name="Old Project",
+                    )
+                ],
+            )
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    with manager_module.ManageZotero(
+        transport=httpx.MockTransport(handler)
+    ) as client:
+        plan = client.plan_collection_update(
+            "PARENT23",
+            name="Renamed Project",
+        )
+
+    assert plan["server_id"] is None
+    assert plan["local_api_write_supported"] is False
+    assert plan["application_mode"] == "manual_zotero_desktop"
+    assert plan["after"]["name"] == "Renamed Project"
+    assert {request.method for request in requests} == {"GET"}
+
+
+def test_manual_plan_cannot_apply_or_request_authorization(manager_module):
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        pytest.fail(f"Unexpected request: {request.method} {request.url}")
+
+    unsigned = {
+        "schema_version": 1,
+        "action": "update_collection",
+        "server_id": None,
+        "local_api_write_supported": False,
+        "application_mode": "manual_zotero_desktop",
+        "before": {
+            "key": "PARENT23",
+            "version": 10,
+            "name": "Old Project",
+            "parentCollection": False,
+            "path": "Old Project",
+        },
+        "after": {
+            "key": "PARENT23",
+            "version": 10,
+            "name": "Renamed Project",
+            "parentCollection": False,
+        },
+    }
+    plan = manager_module.sign_plan(unsigned)
+
+    with (
+        manager_module.ManageZotero(
+            transport=httpx.MockTransport(handler)
+        ) as client,
+        pytest.raises(manager_module.ZoteroManagementError, match="GET-only"),
+    ):
+        client.apply_plan(plan, approval=plan["plan_id"])
+
+    assert requests == []
+
+
+def test_manual_application_mode_blocks_apply_even_with_server_id(manager_module):
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        pytest.fail(f"Unexpected request: {request.method} {request.url}")
+
+    unsigned = {
+        "schema_version": 1,
+        "action": "update_collection",
+        "server_id": "SERVER-ONE",
+        "application_mode": "manual_zotero_desktop",
+        "before": {
+            "key": "PARENT23",
+            "version": 10,
+            "name": "Old Project",
+            "parentCollection": False,
+            "path": "Old Project",
+        },
+        "after": {
+            "key": "PARENT23",
+            "version": 10,
+            "name": "Renamed Project",
+            "parentCollection": False,
+        },
+    }
+    plan = manager_module.sign_plan(unsigned)
+
+    with (
+        manager_module.ManageZotero(
+            transport=httpx.MockTransport(handler)
+        ) as client,
+        pytest.raises(manager_module.ZoteroManagementError, match="GET-only"),
+    ):
+        client.apply_plan(plan, approval=plan["plan_id"])
+
+    assert requests == []
 
 
 def test_plan_items_rejects_child_items_and_noop_changes(manager_module):
@@ -1202,6 +1329,12 @@ def test_skill_declares_read_dependency_and_write_safety_contract():
     assert "Never choose `Always Allow` on the user's behalf" in manage
     assert "system credential store" in manage
     assert "Clear Write Authorizations" in manage
+    assert "local_api_write_supported" in manage
+    assert "manual_zotero_desktop" in manage
+    assert "Zotero-Server-ID" in manage
+    assert "GET-only" in manage
+    assert "manual change" in manage
+    assert "Do not claim" in manage
     assert "Never delete Zotero items or attachments" in manage
     assert "delete confirmation" in manage
     assert "plan ID" in manage
