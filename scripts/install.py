@@ -7,7 +7,7 @@ import shutil
 from pathlib import Path
 
 TARGET_PATHS = {
-    "antigravity": Path(".gemini/antigravity/skills"),
+    "antigravity": Path(".gemini/config/skills"),
     "claude": Path(".claude/skills"),
     "codex": Path(".agents/skills"),
     "opencode": Path(".agents/skills"),

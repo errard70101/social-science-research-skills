@@ -20,6 +20,20 @@ def test_resolve_targets_deduplicates_shared_agents_directory(install_module, tm
     assert destinations == [home / ".agents" / "skills"]
 
 
+def test_antigravity_uses_current_shared_global_skills_directory(
+    install_module,
+    tmp_path,
+):
+    home = tmp_path / "home"
+
+    destinations = install_module.resolve_destinations(
+        ["antigravity"],
+        home=home,
+    )
+
+    assert destinations == [home / ".gemini" / "config" / "skills"]
+
+
 def test_copy_install_replaces_only_selected_skill(install_module, tmp_path):
     repo = tmp_path / "repo"
     skill = make_skill(repo)

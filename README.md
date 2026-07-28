@@ -39,7 +39,12 @@ python scripts/install.py --all --link
 ```
 
 The installer copies skills by default. Codex, OpenCode, and Copilot CLI share
-`~/.agents/skills`; Antigravity and Claude Code use their own skill directories.
+`~/.agents/skills`; Antigravity uses its current shared global directory,
+`~/.gemini/config/skills`; Claude Code uses `~/.claude/skills`.
+
+The installer does not remove copies left in Antigravity's legacy
+`~/.gemini/antigravity/skills` directory. Review those separately after
+confirming the current installation is discoverable.
 
 ## Skills
 
