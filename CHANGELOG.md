@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-07-29
+
+### Added
+- **`query-zotero-library`**: new cross-platform skill for searching a
+  researcher's personal Zotero library through the official read-only Local
+  API, resolving local PDF attachments, and extracting bounded page evidence.
+- Collection discovery with nested paths, item counts, and exact collection-key
+  selection.
+- Read-only retrieval of child notes and PDF annotations, including selected
+  text, comments, page labels, tags, and attachment provenance.
+- Optional PyMuPDF fallback for PDFs that `pypdf` cannot open or extracts as
+  nearly empty or control-character-corrupted text.
+
+### Changed
+- PDF extraction can return leading pages without a query or rank bounded pages
+  by query. Results identify the parser and any pages supplied by fallback.
+- Zotero search responses expose `Total-Results` truncation and decoded native
+  attachment paths without requiring Web API keys, SQLite access, third-party
+  MCP servers, vector indexing, or filesystem searches.
+
+### Fixed
+- Percent-encoded spaces and Unicode characters in Local API attachment URLs
+  are decoded before checking file availability.
+- Collection filters accept exact Zotero keys and report ambiguous duplicate
+  names instead of silently selecting one.
+
 ## [0.2.2] - 2026-07-27
 
 Audit pass over the skill surface. Every finding was a skill instructing an

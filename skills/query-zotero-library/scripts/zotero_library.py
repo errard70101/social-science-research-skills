@@ -1,10 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import importlib
 import ipaddress
 import json
 import os
 import re
+import unicodedata
+from contextlib import suppress
+from html.parser import HTMLParser
 from pathlib import Path, PureWindowsPath
 from urllib.parse import unquote, urlsplit
 
@@ -12,10 +16,20 @@ import httpx
 from pypdf import PdfReader
 from pypdf.errors import PyPdfError
 
+pymupdf = None
+_PYMUPDF_IMPORT_ATTEMPTED = False
+
 LOCAL_API_BASE = "http://localhost:23119/api/"
 LOCAL_API_PORT = 23119
 API_HEADERS = {"Zotero-API-Version": "3"}
 MAX_SEARCH_RESULTS = 50
+API_PAGE_SIZE = 100
+MIN_MEANINGFUL_PAGE_CHARACTERS = 5
+COLLECTION_KEY_PATTERN = re.compile(
+    r"^[23456789ABCDEFGHIJKLMNPQRSTUVWXYZ]{8}$",
+    flags=re.IGNORECASE,
+)
+ITEM_KEY_PATTERN = COLLECTION_KEY_PATTERN
 
 
 class ZoteroError(RuntimeError):
@@ -160,7 +174,17 @@ def resolve_collection_key(
     collections: list[dict[str, object]],
     requested: str,
 ) -> str:
-    """Resolve either an exact nested path or an unambiguous bare name."""
+    """Resolve an exact key, nested path, or unambiguous bare name."""
+    requested = requested.strip()
+    matching_keys = [
+        str(collection["key"])
+        for collection in collections
+        if collection.get("key")
+        and str(collection["key"]).casefold() == requested.casefold()
+    ]
+    if len(matching_keys) == 1:
+        return matching_keys[0]
+
     normalized = _normalize_collection_path(requested)
     if not normalized:
         raise ValueError("Collection name cannot be empty")
@@ -191,6 +215,8 @@ def resolve_collection_key(
                 f"Collection name is ambiguous: {requested}. Use one of: {choices}"
             )
 
+    if COLLECTION_KEY_PATTERN.fullmatch(requested):
+        raise ValueError(f"Zotero collection key was not found: {requested}")
     raise ValueError(f"Zotero collection was not found: {requested}")
 
 
@@ -235,6 +261,82 @@ def _is_pdf_attachment(data: dict[str, object]) -> bool:
     content_type = str(data.get("contentType", "")).casefold()
     filename = str(data.get("filename", "")).casefold()
     return content_type == "application/pdf" or filename.endswith(".pdf")
+
+
+def _tags(data: dict[str, object]) -> list[str]:
+    tags = data.get("tags", [])
+    if not isinstance(tags, list):
+        return []
+    return [
+        str(tag["tag"])
+        for tag in tags
+        if isinstance(tag, dict) and tag.get("tag")
+    ]
+
+
+class _ReadableNoteParser(HTMLParser):
+    """Convert Zotero note HTML into compact, readable plain text."""
+
+    _BLOCK_TAGS = {"br", "div", "li", "p", "tr"}
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.parts: list[str] = []
+
+    def handle_starttag(
+        self,
+        tag: str,
+        attrs: list[tuple[str, str | None]],
+    ) -> None:
+        del attrs
+        if tag.casefold() in self._BLOCK_TAGS:
+            self.parts.append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag.casefold() in self._BLOCK_TAGS:
+            self.parts.append("\n")
+
+    def handle_data(self, data: str) -> None:
+        self.parts.append(data)
+
+    def text(self) -> str:
+        lines = [
+            " ".join(line.split())
+            for line in "".join(self.parts).splitlines()
+            if line.strip()
+        ]
+        return "\n".join(lines)
+
+
+def _note_text(value: object) -> str:
+    parser = _ReadableNoteParser()
+    parser.feed(str(value or ""))
+    parser.close()
+    return parser.text()
+
+
+def _meaningful_character_count(text: str) -> int:
+    return sum(character.isalnum() for character in text)
+
+
+def _has_suspicious_control_characters(text: str) -> bool:
+    controls = sum(
+        unicodedata.category(character) == "Cc"
+        and character not in {"\n", "\r", "\t"}
+        for character in text
+    )
+    return "\ufffd" in text or controls >= 2
+
+
+def _pymupdf_backend():
+    global _PYMUPDF_IMPORT_ATTEMPTED, pymupdf
+    if pymupdf is not None:
+        return pymupdf
+    if not _PYMUPDF_IMPORT_ATTEMPTED:
+        _PYMUPDF_IMPORT_ATTEMPTED = True
+        with suppress(ImportError):
+            pymupdf = importlib.import_module("pymupdf")
+    return pymupdf
 
 
 class LocalZotero:
@@ -293,6 +395,37 @@ class LocalZotero:
         response = self._get(path, params=params)
         return self._decode_json(response, path)
 
+    def _get_all_json(
+        self,
+        path: str,
+        *,
+        params: dict[str, object] | None = None,
+    ) -> list[dict[str, object]]:
+        results: list[dict[str, object]] = []
+        start = 0
+        total_results: int | None = None
+        while total_results is None or start < total_results:
+            page_params = dict(params or {})
+            page_params.update({"limit": API_PAGE_SIZE, "start": start})
+            response = self._get(path, params=page_params)
+            payload = self._decode_json(response, path)
+            if not isinstance(payload, list):
+                raise ZoteroError(
+                    f"Zotero Local API returned malformed results for {path}"
+                )
+            page = [item for item in payload if isinstance(item, dict)]
+            results.extend(page)
+
+            total_header = response.headers.get("Total-Results", "")
+            if total_header.isdecimal():
+                total_results = int(total_header)
+            if not payload:
+                break
+            start += len(payload)
+            if total_results is None and len(payload) < API_PAGE_SIZE:
+                break
+        return results
+
     @staticmethod
     def _decode_json(response: httpx.Response, path: str) -> object:
         try:
@@ -315,6 +448,25 @@ class LocalZotero:
         if not isinstance(payload, list):
             raise ZoteroError("Zotero Local API returned malformed collections")
         return [item for item in payload if isinstance(item, dict)]
+
+    def collection_catalog(self) -> dict[str, object]:
+        collections = self.collections()
+        paths = build_collection_paths(collections)
+        summaries: list[dict[str, object]] = []
+        for collection in collections:
+            key = str(collection.get("key") or "")
+            meta = collection.get("meta")
+            item_count = meta.get("numItems") if isinstance(meta, dict) else None
+            summaries.append(
+                {
+                    "name": _collection_name(collection),
+                    "path": paths[key],
+                    "key": key,
+                    "item_count": item_count,
+                }
+            )
+        summaries.sort(key=lambda item: str(item["path"]).casefold())
+        return {"count": len(summaries), "collections": summaries}
 
     def search(
         self,
@@ -397,12 +549,6 @@ class LocalZotero:
                 and _is_pdf_attachment(child["data"])
             ]
 
-        tags = data.get("tags", [])
-        tag_names = [
-            str(tag["tag"])
-            for tag in tags
-            if isinstance(tag, dict) and tag.get("tag")
-        ]
         return {
             "key": key,
             "item_type": data.get("itemType"),
@@ -414,12 +560,144 @@ class LocalZotero:
             "abstract": data.get("abstractNote") or "",
             "doi": data.get("DOI") or "",
             "url": data.get("url") or "",
-            "tags": tag_names,
+            "tags": _tags(data),
             "collections": data.get("collections") or [],
             "attachments": [
                 self._resolve_attachment(attachment)
                 for attachment in raw_attachments
             ],
+        }
+
+    def notes_and_annotations(self, item_key: str) -> dict[str, object]:
+        """Return child notes and PDF annotations for one Zotero item."""
+        normalized_key = item_key.strip().upper()
+        if not ITEM_KEY_PATTERN.fullmatch(normalized_key):
+            raise ValueError("Zotero item key must be eight valid characters")
+
+        item = self._get_json(f"users/0/items/{normalized_key}")
+        if not isinstance(item, dict):
+            raise ZoteroError(f"Zotero item {normalized_key} is malformed")
+        data = item.get("data")
+        if not isinstance(data, dict):
+            raise ZoteroError(f"Zotero item {normalized_key} has malformed data")
+
+        if _is_pdf_attachment(data):
+            children: list[dict[str, object]] = []
+            attachments = [item]
+        else:
+            raw_children = self._get_json(
+                f"users/0/items/{normalized_key}/children"
+            )
+            if not isinstance(raw_children, list):
+                raise ZoteroError(
+                    f"Zotero item {normalized_key} has malformed children"
+                )
+            children = [
+                child for child in raw_children if isinstance(child, dict)
+            ]
+            attachments = [
+                child
+                for child in children
+                if isinstance(child.get("data"), dict)
+                and _is_pdf_attachment(child["data"])
+            ]
+
+        notes = [
+            self._format_note(child)
+            for child in children
+            if isinstance(child.get("data"), dict)
+            and child["data"].get("itemType") == "note"
+        ]
+        attachment_keys = {
+            str(attachment.get("key") or "")
+            for attachment in attachments
+            if attachment.get("key")
+        }
+        annotations = (
+            self._get_all_json(
+                "users/0/items",
+                params={"itemType": "annotation"},
+            )
+            if attachment_keys
+            else []
+        )
+        annotations_by_attachment: dict[str, list[dict[str, object]]] = {
+            key: [] for key in attachment_keys
+        }
+        for annotation in annotations:
+            annotation_data = annotation.get("data")
+            if not isinstance(annotation_data, dict):
+                continue
+            parent_key = str(annotation_data.get("parentItem") or "")
+            if parent_key in annotations_by_attachment:
+                annotations_by_attachment[parent_key].append(
+                    self._format_annotation(annotation)
+                )
+
+        formatted_attachments: list[dict[str, object]] = []
+        for attachment in attachments:
+            attachment_data = attachment.get("data")
+            if not isinstance(attachment_data, dict):
+                continue
+            key = str(attachment.get("key") or "")
+            attachment_annotations = annotations_by_attachment.get(key, [])
+            attachment_annotations.sort(
+                key=lambda value: (
+                    str(value["sort_index"]),
+                    str(value["key"]),
+                )
+            )
+            formatted_attachments.append(
+                {
+                    "key": key,
+                    "title": attachment_data.get("title") or "",
+                    "filename": attachment_data.get("filename") or "",
+                    "annotations": attachment_annotations,
+                }
+            )
+
+        return {
+            "item": {
+                "key": normalized_key,
+                "item_type": data.get("itemType"),
+                "title": data.get("title") or data.get("filename") or "",
+            },
+            "note_count": len(notes),
+            "annotation_count": sum(
+                len(attachment["annotations"])
+                for attachment in formatted_attachments
+            ),
+            "notes": notes,
+            "attachments": formatted_attachments,
+        }
+
+    @staticmethod
+    def _format_note(item: dict[str, object]) -> dict[str, object]:
+        data = item.get("data")
+        if not isinstance(data, dict):
+            raise ZoteroError("Zotero note has malformed data")
+        return {
+            "key": str(item.get("key") or data.get("key") or ""),
+            "text": _note_text(data.get("note")),
+            "tags": _tags(data),
+            "date_modified": data.get("dateModified") or "",
+        }
+
+    @staticmethod
+    def _format_annotation(item: dict[str, object]) -> dict[str, object]:
+        data = item.get("data")
+        if not isinstance(data, dict):
+            raise ZoteroError("Zotero annotation has malformed data")
+        return {
+            "key": str(item.get("key") or data.get("key") or ""),
+            "type": data.get("annotationType") or "",
+            "text": data.get("annotationText") or "",
+            "comment": data.get("annotationComment") or "",
+            "color": data.get("annotationColor") or "",
+            "page_label": data.get("annotationPageLabel") or "",
+            "sort_index": data.get("annotationSortIndex") or "",
+            "tags": _tags(data),
+            "date_modified": data.get("dateModified") or "",
         }
 
     def _resolve_attachment(
@@ -452,10 +730,8 @@ class LocalZotero:
             path = file_url_to_path(file_url)
         except ValueError as exc:
             result["error"] = str(exc)
-            result["file_url"] = file_url
             return result
 
-        result["file_url"] = file_url
         result["path"] = path
         result["available"] = Path(path).is_file()
         if not result["available"]:
@@ -475,7 +751,7 @@ def _query_terms(query: str | None) -> list[str]:
 def extract_pdf(
     source: str | Path,
     *,
-    query: str | None,
+    query: str | None = None,
     max_pages: int = 8,
     max_chars_per_page: int = 12_000,
 ) -> dict[str, object]:
@@ -487,56 +763,161 @@ def extract_pdf(
         raise ValueError("max_pages must be at least 1")
     if max_chars_per_page < 1:
         raise ValueError("max_chars_per_page must be at least 1")
-    if not query or not query.strip():
-        raise ValueError("A non-empty query is required for relevant-page extraction")
+    if query is not None and not query.strip():
+        raise ValueError("When provided, query must not be blank")
 
-    reader = PdfReader(str(path))
-    terms = _query_terms(query)
-    phrase = query.casefold().strip()
+    normalized_query = query.strip() if query is not None else None
+    terms = _query_terms(normalized_query)
+    phrase = normalized_query.casefold() if normalized_query else ""
     pages: list[dict[str, object]] = []
     empty_pages: list[int] = []
+    fallback_pages: list[int] = []
+    fallback_errors: list[str] = []
+    fallback_document = None
+    fallback_backend = None
+    reader = None
 
-    for index, page in enumerate(reader.pages, start=1):
-        text = (page.extract_text() or "").strip()
-        if not text:
-            empty_pages.append(index)
-        folded = text.casefold()
-        score = sum(folded.count(term) for term in terms)
-        if phrase:
-            score += 5 * folded.count(phrase)
-        pages.append(
-            {
-                "page": index,
-                "score": score,
-                "text": text[:max_chars_per_page],
-                "truncated": len(text) > max_chars_per_page,
-            }
-        )
+    try:
+        reader = PdfReader(str(path))
+        total_pages = len(reader.pages)
+    except PyPdfError as primary_error:
+        fallback_backend = _pymupdf_backend()
+        if fallback_backend is None:
+            raise
+        try:
+            fallback_document = fallback_backend.open(str(path))
+        except Exception as fallback_error:
+            raise primary_error from fallback_error
+        total_pages = len(fallback_document)
 
-    matched_pages = [page for page in pages if int(page["score"]) > 0]
-    matched_pages.sort(
-        key=lambda page: (-int(page["score"]), int(page["page"]))
+    pages_to_extract = (
+        total_pages
+        if normalized_query is not None
+        else min(total_pages, max_pages)
     )
-    selected = matched_pages[:max_pages]
+    try:
+        for page_index in range(pages_to_extract):
+            page_number = page_index + 1
+            primary_error: Exception | None = None
+            if reader is None:
+                text = ""
+            else:
+                try:
+                    text = (reader.pages[page_index].extract_text() or "").strip()
+                except Exception as exc:
+                    text = ""
+                    primary_error = exc
+
+            needs_fallback = (
+                reader is None
+                or _meaningful_character_count(text)
+                < MIN_MEANINGFUL_PAGE_CHARACTERS
+                or _has_suspicious_control_characters(text)
+            )
+            if needs_fallback:
+                fallback_backend = fallback_backend or _pymupdf_backend()
+            if needs_fallback and fallback_backend is not None:
+                try:
+                    if fallback_document is None:
+                        fallback_document = fallback_backend.open(str(path))
+                    fallback_text = (
+                        fallback_document.load_page(page_index).get_text("text")
+                        or ""
+                    ).strip()
+                except Exception as exc:
+                    fallback_errors.append(f"page {page_number}: {exc}")
+                else:
+                    fallback_is_cleaner = (
+                        _has_suspicious_control_characters(text)
+                        and not _has_suspicious_control_characters(fallback_text)
+                        and _meaningful_character_count(fallback_text)
+                        >= MIN_MEANINGFUL_PAGE_CHARACTERS
+                    )
+                    fallback_has_more_text = _meaningful_character_count(
+                        fallback_text
+                    ) > _meaningful_character_count(text)
+                    if (
+                        reader is None
+                        or fallback_is_cleaner
+                        or fallback_has_more_text
+                    ):
+                        text = fallback_text
+                        fallback_pages.append(page_number)
+
+            if primary_error is not None and page_number not in fallback_pages:
+                raise PyPdfError(
+                    f"Cannot extract text from PDF page {page_number}"
+                ) from primary_error
+
+            if not text:
+                empty_pages.append(page_number)
+            folded = text.casefold()
+            score = sum(folded.count(term) for term in terms)
+            if phrase:
+                score += 5 * folded.count(phrase)
+            pages.append(
+                {
+                    "page": page_number,
+                    "score": score,
+                    "text": text[:max_chars_per_page],
+                    "truncated": len(text) > max_chars_per_page,
+                }
+            )
+    finally:
+        if fallback_document is not None:
+            fallback_document.close()
+
+    if normalized_query is not None:
+        matched_pages = [page for page in pages if int(page["score"]) > 0]
+        matched_pages.sort(
+            key=lambda page: (-int(page["score"]), int(page["page"]))
+        )
+        selected = matched_pages[:max_pages]
+        matched_count: int | None = len(matched_pages)
+        selection_mode = "query-ranked"
+    else:
+        selected = pages[:max_pages]
+        matched_count = None
+        selection_mode = "leading-pages"
+
     warnings: list[str] = []
+    if fallback_pages:
+        page_list = ", ".join(str(page) for page in fallback_pages)
+        warnings.append(
+            f"PyMuPDF fallback supplied text for PDF pages: {page_list}."
+        )
+    if fallback_errors:
+        warnings.append(
+            "PyMuPDF fallback could not read some low-text pages; retained "
+            "the pypdf output."
+        )
     if empty_pages:
         warnings.append(
             "Some pages have no extractable text; the PDF may require OCR."
         )
     if not any(page["text"] for page in pages):
         warnings.append("No extractable text was found in the PDF.")
-    elif not matched_pages:
+    elif normalized_query is not None and not selected:
         warnings.append(
             "No pages matched the query; refine the query or inspect another PDF."
         )
 
     return {
         "source": str(path),
-        "query": query,
-        "total_pages": len(reader.pages),
-        "matched_pages": len(matched_pages),
+        "query": normalized_query,
+        "selection_mode": selection_mode,
+        "total_pages": total_pages,
+        "matched_pages": matched_count,
         "returned_pages": len(selected),
         "pages": selected,
+        "parser": (
+            "pypdf"
+            if not fallback_pages
+            else "pymupdf"
+            if len(fallback_pages) == pages_to_extract
+            else "mixed"
+        ),
+        "fallback_pages": fallback_pages,
         "warnings": warnings,
     }
 
@@ -548,6 +929,18 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     subparsers.add_parser("check", help="Check Zotero Local API availability")
+    subparsers.add_parser(
+        "collections",
+        help="List personal-library collection paths, keys, and item counts",
+    )
+    annotations_parser = subparsers.add_parser(
+        "annotations",
+        help="Read child notes and PDF annotations for one Zotero item",
+    )
+    annotations_parser.add_argument(
+        "item_key",
+        help="Eight-character Zotero bibliographic item or PDF attachment key",
+    )
 
     search_parser = subparsers.add_parser(
         "search",
@@ -556,7 +949,7 @@ def build_parser() -> argparse.ArgumentParser:
     search_parser.add_argument("query", help="A compact search phrase")
     search_parser.add_argument(
         "--collection",
-        help="Optional collection name or nested path",
+        help="Optional collection key, nested path, or unambiguous name",
     )
     search_parser.add_argument(
         "--limit",
@@ -567,13 +960,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     extract_parser = subparsers.add_parser(
         "extract",
-        help="Extract the most relevant pages from a local PDF",
+        help="Extract query-ranked or leading pages from a local PDF",
     )
     extract_parser.add_argument("path", type=Path, help="Local PDF path")
     extract_parser.add_argument(
         "--query",
-        required=True,
-        help="Terms used to select and rank relevant pages",
+        help="Optional terms used to select and rank relevant pages",
     )
     extract_parser.add_argument(
         "--max-pages",
@@ -614,6 +1006,10 @@ def main(argv: list[str] | None = None) -> int:
             with LocalZotero() as client:
                 if args.command == "check":
                     result = client.check()
+                elif args.command == "collections":
+                    result = client.collection_catalog()
+                elif args.command == "annotations":
+                    result = client.notes_and_annotations(args.item_key)
                 else:
                     result = client.search(
                         args.query,

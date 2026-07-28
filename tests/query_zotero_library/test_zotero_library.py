@@ -135,6 +135,37 @@ def test_collection_resolution_rejects_ambiguous_bare_name(zotero_module):
         zotero_module.resolve_collection_key(collections, "Papers")
 
 
+def test_collection_resolution_accepts_exact_collection_key(zotero_module):
+    collections = [
+        {
+            "key": "2JY7DCQX",
+            "data": {"name": "Japanese Female", "parentCollection": False},
+        }
+    ]
+
+    assert (
+        zotero_module.resolve_collection_key(collections, "2JY7DCQX")
+        == "2JY7DCQX"
+    )
+
+    with pytest.raises(ValueError, match="key"):
+        zotero_module.resolve_collection_key(collections, "3ABCDEFH")
+
+
+def test_key_shaped_collection_name_still_resolves_by_name(zotero_module):
+    collections = [
+        {
+            "key": "2JY7DCQX",
+            "data": {"name": "RESEARCH", "parentCollection": False},
+        }
+    ]
+
+    assert (
+        zotero_module.resolve_collection_key(collections, "RESEARCH")
+        == "2JY7DCQX"
+    )
+
+
 def test_editor_only_item_does_not_relabel_editor_as_author(zotero_module):
     data = {
         "creators": [
@@ -217,6 +248,56 @@ def test_check_reports_documented_header_versions(zotero_module):
         "ok": True,
         "api_version": "3",
         "schema_version": "42",
+    }
+
+
+def test_collection_catalog_returns_paths_keys_and_counts(zotero_module):
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path == "/api/users/0/collections"
+        return httpx.Response(
+            200,
+            json=[
+                {
+                    "key": "PARENT01",
+                    "data": {
+                        "name": "Projects",
+                        "parentCollection": False,
+                    },
+                    "meta": {"numItems": 2},
+                },
+                {
+                    "key": "2JY7DCQX",
+                    "data": {
+                        "name": "Japanese Female",
+                        "parentCollection": "PARENT01",
+                    },
+                    "meta": {"numItems": 7},
+                },
+            ],
+        )
+
+    with zotero_module.LocalZotero(
+        transport=httpx.MockTransport(handler)
+    ) as client:
+        result = client.collection_catalog()
+
+    assert result == {
+        "count": 2,
+        "collections": [
+            {
+                "name": "Projects",
+                "path": "Projects",
+                "key": "PARENT01",
+                "item_count": 2,
+            },
+            {
+                "name": "Japanese Female",
+                "path": "Projects / Japanese Female",
+                "key": "2JY7DCQX",
+                "item_count": 7,
+            },
+        ],
     }
 
 
@@ -324,6 +405,8 @@ def test_search_collection_uses_full_text_and_returns_pdf(zotero_module):
     assert item["authors"] == ["Ada Lovelace"]
     assert item["year"] == "2025"
     assert item["attachments"][0]["path"].endswith("ITS paper.pdf")
+    assert "%20" not in item["attachments"][0]["path"]
+    assert "file_url" not in item["attachments"][0]
     assert {request.method for request in requests} == {"GET"}
 
 
@@ -395,6 +478,141 @@ def test_missing_local_pdf_is_reported_without_losing_item(zotero_module):
     assert "not available" in attachment["error"].lower()
 
 
+def test_notes_and_annotations_returns_readable_context(zotero_module):
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/api/users/0/items/PAPER234":
+            return httpx.Response(
+                200,
+                json={
+                    "key": "PAPER234",
+                    "data": {
+                        "itemType": "journalArticle",
+                        "title": "An ITS Paper",
+                    },
+                },
+            )
+        if request.url.path == "/api/users/0/items/PAPER234/children":
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "key": "NOTE0001",
+                        "data": {
+                            "itemType": "note",
+                            "note": "<p>Main result &amp; caveat.</p>",
+                            "tags": [{"tag": "reviewed"}],
+                            "dateModified": "2026-07-29T00:00:00Z",
+                        },
+                    },
+                    {
+                        "key": "ATTACH01",
+                        "data": {
+                            "itemType": "attachment",
+                            "contentType": "application/pdf",
+                            "filename": "paper.pdf",
+                            "title": "Full Text PDF",
+                        },
+                    },
+                ],
+            )
+        if request.url.path == "/api/users/0/items":
+            assert request.url.params["itemType"] == "annotation"
+            assert request.url.params["limit"] == "100"
+            if request.url.params["start"] == "0":
+                return httpx.Response(
+                    200,
+                    json=[
+                        {
+                            "key": "ANNOT001",
+                            "data": {
+                                "itemType": "annotation",
+                                "parentItem": "ATTACH01",
+                                "annotationType": "highlight",
+                                "annotationText": "Bandwidth choice matters.",
+                                "annotationComment": "Compare with placebo.",
+                                "annotationColor": "#ffd400",
+                                "annotationPageLabel": "12",
+                                "annotationSortIndex": "00012|000001",
+                                "tags": [{"tag": "identification"}],
+                                "dateModified": "2026-07-29T00:01:00Z",
+                            },
+                        }
+                    ],
+                    headers={"Total-Results": "2"},
+                )
+            assert request.url.params["start"] == "1"
+            return httpx.Response(
+                200,
+                json=[
+                    {
+                        "key": "OTHER001",
+                        "data": {
+                            "itemType": "annotation",
+                            "parentItem": "OTHERPDF",
+                            "annotationType": "highlight",
+                            "annotationText": "Unrelated annotation.",
+                        },
+                    }
+                ],
+                headers={"Total-Results": "2"},
+            )
+        raise AssertionError(f"Unexpected request: {request.url}")
+
+    with zotero_module.LocalZotero(
+        transport=httpx.MockTransport(handler)
+    ) as client:
+        result = client.notes_and_annotations("PAPER234")
+
+    assert result["item"] == {
+        "key": "PAPER234",
+        "item_type": "journalArticle",
+        "title": "An ITS Paper",
+    }
+    assert result["note_count"] == 1
+    assert result["notes"] == [
+        {
+            "key": "NOTE0001",
+            "text": "Main result & caveat.",
+            "tags": ["reviewed"],
+            "date_modified": "2026-07-29T00:00:00Z",
+        }
+    ]
+    assert result["annotation_count"] == 1
+    assert result["attachments"] == [
+        {
+            "key": "ATTACH01",
+            "title": "Full Text PDF",
+            "filename": "paper.pdf",
+            "annotations": [
+                {
+                    "key": "ANNOT001",
+                    "type": "highlight",
+                    "text": "Bandwidth choice matters.",
+                    "comment": "Compare with placebo.",
+                    "color": "#ffd400",
+                    "page_label": "12",
+                    "sort_index": "00012|000001",
+                    "tags": ["identification"],
+                    "date_modified": "2026-07-29T00:01:00Z",
+                }
+            ],
+        }
+    ]
+    assert {request.method for request in requests} == {"GET"}
+
+
+def test_notes_and_annotations_rejects_invalid_item_key(zotero_module):
+    with zotero_module.LocalZotero(
+        transport=httpx.MockTransport(
+            lambda request: pytest.fail(f"Unexpected request: {request.url}")
+        )
+    ) as client, pytest.raises(ValueError, match="item key"):
+        client.notes_and_annotations("../secret")
+
+
 def test_extract_pdf_ranks_matching_pages(zotero_module, monkeypatch, tmp_path):
     pdf = tmp_path / "paper.pdf"
     pdf.write_bytes(b"%PDF-1.4 test")
@@ -426,9 +644,185 @@ def test_extract_pdf_ranks_matching_pages(zotero_module, monkeypatch, tmp_path):
     assert result["pages"][0]["score"] > 0
     assert len(result["pages"]) == 1
     assert result["matched_pages"] == 1
+    assert result["selection_mode"] == "query-ranked"
+    assert result["parser"] == "pypdf"
+    assert result["fallback_pages"] == []
 
 
-def test_extract_pdf_requires_query_and_warns_when_nothing_matches(
+def test_extract_pdf_without_query_returns_leading_pages(
+    zotero_module,
+    monkeypatch,
+    tmp_path,
+):
+    pdf = tmp_path / "paper.pdf"
+    pdf.write_bytes(b"%PDF-1.4 test")
+
+    class Page:
+        def __init__(self, text: str, *, should_fail: bool = False):
+            self.text = text
+            self.should_fail = should_fail
+
+        def extract_text(self) -> str:
+            if self.should_fail:
+                raise AssertionError("A trailing page should not be extracted")
+            return self.text
+
+    class Reader:
+        pages = [
+            Page("Cover page."),
+            Page("Abstract and introduction."),
+            Page("Methods.", should_fail=True),
+        ]
+
+    monkeypatch.setattr(zotero_module, "PdfReader", lambda _: Reader())
+
+    result = zotero_module.extract_pdf(pdf, max_pages=2)
+
+    assert result["selection_mode"] == "leading-pages"
+    assert result["query"] is None
+    assert result["matched_pages"] is None
+    assert [page["page"] for page in result["pages"]] == [1, 2]
+
+
+def test_extract_pdf_uses_pymupdf_for_nearly_empty_page(
+    zotero_module,
+    monkeypatch,
+    tmp_path,
+):
+    pdf = tmp_path / "cjk-paper.pdf"
+    pdf.write_bytes(b"%PDF-1.4 test")
+
+    class PrimaryPage:
+        def extract_text(self) -> str:
+            return "?"
+
+    class Reader:
+        pages = [PrimaryPage()]
+
+    class FallbackPage:
+        def get_text(self, mode: str) -> str:
+            assert mode == "text"
+            return "近藤絢子：日本勞動市場的實證結果。"
+
+    class Document:
+        def __len__(self) -> int:
+            return 1
+
+        def load_page(self, page_index: int) -> FallbackPage:
+            assert page_index == 0
+            return FallbackPage()
+
+        def close(self) -> None:
+            pass
+
+    class PyMuPDF:
+        @staticmethod
+        def open(path: str) -> Document:
+            assert path == str(pdf)
+            return Document()
+
+    monkeypatch.setattr(zotero_module, "PdfReader", lambda _: Reader())
+    monkeypatch.setattr(zotero_module, "pymupdf", PyMuPDF())
+
+    result = zotero_module.extract_pdf(pdf, max_pages=1)
+
+    assert result["pages"][0]["text"].startswith("近藤絢子")
+    assert result["parser"] == "pymupdf"
+    assert result["fallback_pages"] == [1]
+    assert any("PyMuPDF" in warning for warning in result["warnings"])
+
+
+def test_extract_pdf_replaces_control_character_garble_with_pymupdf(
+    zotero_module,
+    monkeypatch,
+    tmp_path,
+):
+    pdf = tmp_path / "encoded-cjk-paper.pdf"
+    pdf.write_bytes(b"%PDF-1.4 test")
+
+    class PrimaryPage:
+        def extract_text(self) -> str:
+            return "RIETI IUUQT\x1b\x10XXX\x0fSJFUJ encoded title"
+
+    class Reader:
+        pages = [PrimaryPage()]
+
+    class FallbackPage:
+        def get_text(self, mode: str) -> str:
+            assert mode == "text"
+            return "市町村税務データを用いた既婚女性の就労調整の分析"
+
+    class Document:
+        def __len__(self) -> int:
+            return 1
+
+        def load_page(self, page_index: int) -> FallbackPage:
+            assert page_index == 0
+            return FallbackPage()
+
+        def close(self) -> None:
+            pass
+
+    class PyMuPDF:
+        @staticmethod
+        def open(path: str) -> Document:
+            assert path == str(pdf)
+            return Document()
+
+    monkeypatch.setattr(zotero_module, "PdfReader", lambda _: Reader())
+    monkeypatch.setattr(zotero_module, "pymupdf", PyMuPDF())
+
+    result = zotero_module.extract_pdf(pdf, max_pages=1)
+
+    assert result["pages"][0]["text"].startswith("市町村税務")
+    assert result["parser"] == "pymupdf"
+    assert result["fallback_pages"] == [1]
+
+
+def test_extract_pdf_uses_pymupdf_when_pypdf_cannot_open(
+    zotero_module,
+    monkeypatch,
+    tmp_path,
+):
+    pdf = tmp_path / "legacy-paper.pdf"
+    pdf.write_bytes(b"%PDF-1.4 test")
+
+    class FallbackPage:
+        def get_text(self, mode: str) -> str:
+            assert mode == "text"
+            return "Fallback text from a legacy PDF."
+
+    class Document:
+        def __len__(self) -> int:
+            return 1
+
+        def load_page(self, page_index: int) -> FallbackPage:
+            assert page_index == 0
+            return FallbackPage()
+
+        def close(self) -> None:
+            pass
+
+    class PyMuPDF:
+        @staticmethod
+        def open(path: str) -> Document:
+            assert path == str(pdf)
+            return Document()
+
+    def fail_reader(path: str):
+        raise zotero_module.PyPdfError(f"pypdf cannot read {path}")
+
+    monkeypatch.setattr(zotero_module, "PdfReader", fail_reader)
+    monkeypatch.setattr(zotero_module, "pymupdf", PyMuPDF())
+
+    result = zotero_module.extract_pdf(pdf, max_pages=1)
+
+    assert result["pages"][0]["text"] == "Fallback text from a legacy PDF."
+    assert result["parser"] == "pymupdf"
+    assert result["fallback_pages"] == [1]
+
+
+def test_extract_pdf_rejects_blank_query_and_warns_when_nothing_matches(
     zotero_module,
     monkeypatch,
     tmp_path,
@@ -459,6 +853,22 @@ def test_extract_pdf_requires_query_and_warns_when_nothing_matches(
     assert any("No pages matched" in warning for warning in result["warnings"])
 
 
+def test_cli_exposes_collections_and_optional_extract_query(zotero_module):
+    parser = zotero_module.build_parser()
+
+    collections_args = parser.parse_args(["collections"])
+    annotations_args = parser.parse_args(["annotations", "PAPER001"])
+    extract_args = parser.parse_args(
+        ["extract", "paper.pdf", "--max-pages", "2"]
+    )
+
+    assert collections_args.command == "collections"
+    assert annotations_args.command == "annotations"
+    assert annotations_args.item_key == "PAPER001"
+    assert extract_args.command == "extract"
+    assert extract_args.query is None
+
+
 def test_main_reports_local_api_connection_failure(
     zotero_module,
     monkeypatch,
@@ -478,9 +888,16 @@ def test_main_reports_local_api_connection_failure(
     assert "Local API" in output["error"]
 
 
-def test_main_reports_unreadable_pdf_as_json(zotero_module, tmp_path, capsys):
+def test_main_reports_unreadable_pdf_as_json(
+    zotero_module,
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
     pdf = tmp_path / "broken.pdf"
     pdf.write_bytes(b"not a PDF")
+    monkeypatch.setattr(zotero_module, "pymupdf", None)
+    monkeypatch.setattr(zotero_module, "_PYMUPDF_IMPORT_ATTEMPTED", True)
 
     exit_code = zotero_module.main(
         ["extract", str(pdf), "--query", "identification"]
@@ -503,6 +920,11 @@ def test_skill_documents_zero_config_read_only_evidence_contract():
     assert "Do not create embeddings" in text
     assert "If the extracted evidence is insufficient" in text
     assert "Total-Results" in text
+    assert "collections" in text
+    assert "annotations" in text
+    assert "PyMuPDF" in text
+    assert "Do not use `find`" in text
+    assert "decoded `path`" in text
 
 
 def test_readme_lists_query_zotero_library():
