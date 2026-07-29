@@ -125,6 +125,11 @@ patch operations. Omitting an existing value removes it. The helper therefore
 merges requested additions/removals into the complete current arrays during
 planning and writes only the reviewed result.
 
+Tags and collection membership are set-like even though the API represents
+them as arrays. Preserve the reviewed complete arrays for writes, but use an
+order-insensitive comparison for drift checks and verification. A server-side
+reordering alone is not a state change.
+
 Zotero accepts at most 50 objects in a batch write. The helper applies the same
 limit to an item plan.
 
@@ -132,8 +137,16 @@ limit to an item plan.
 
 Deleting a collection also deletes its subcollections, but not the library
 items filed in them. Items with no remaining memberships become Unfiled. A
-delete plan therefore enumerates every descendant and paginates through all
-top-level items before it reports impact.
+delete plan therefore enumerates every descendant. On the Web API backend, it
+paginates through the items in only those collections and requires every page
+to match the collection snapshot's library version. The Local API fallback
+continues to inspect all top-level items when a consistent library-version
+snapshot is unavailable.
+
+The Web API can delete multiple independent root collections in one atomic,
+library-versioned request. One plan must snapshot the union of their trees and
+affected memberships, reject redundant ancestor/descendant targets, and bind
+all keys to one exact delete confirmation sequence.
 
 Applying deletion requires:
 
@@ -168,5 +181,10 @@ reconstruction. It does not claim that deletion can be automatically undone.
 - HTTP conflict or changed version: stop and create a new plan.
 - Write response or verification failure: preserve the evidence, inspect state
   with GET requests, and ask the user before any corrective write.
+- HTTP 5xx or a post-submission timeout means the write outcome is indeterminate.
+  Preserve the item or delete plan ID, do not retry automatically, and run
+  `inspect-plan-state`. Retry only after it reports `not_applied` and
+  `safe_to_retry: true` and the user explicitly approves the retry. Other plan
+  actions require manual GET inspection until they gain an explicit inspector.
 - Existing plan or receipt path: choose a new path; never overwrite the old
   record.

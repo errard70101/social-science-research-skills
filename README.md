@@ -149,7 +149,12 @@ explicit status or forget actions. Keys never enter arguments, environment
 variables, plans, receipts, logs, chat, or repository files.
 Collection deletion additionally requires the target key and never deletes
 library items or attachments. Web collection deletion binds the reviewed
-cascade to one library version and uses an atomic library-version guard.
+cascade to one library version and uses an atomic library-version guard. A
+manifest command supports different tag and collection changes for each item;
+multiple independent collections can also be reviewed and deleted in one Web
+API plan. Collection verification ignores server-side membership ordering,
+and indeterminate 5xx or timeout outcomes have a GET-only inspection command
+that must run before any retry.
 
 Installing this skill also installs the `zotero-read` provider used to discover
 exact targets.

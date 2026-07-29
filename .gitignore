@@ -12,6 +12,7 @@ build/
 .worktrees/
 docs/superpowers/
 .skill-workflow-runs/
+.zotero-management/
 
 # AI & Plugin configs
 .claude/

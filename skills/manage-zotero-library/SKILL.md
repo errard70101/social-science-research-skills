@@ -23,9 +23,11 @@ Supported:
 
 - Add or remove tags on top-level bibliographic items.
 - Add or remove those items from collections.
+- Plan different tag and collection changes per item from a reviewed manifest.
 - Create a collection.
 - Rename or move a collection.
 - Delete a collection after reviewing its full cascade impact.
+- Delete multiple root collections atomically through one approved Web API plan.
 
 Not supported:
 
@@ -35,6 +37,9 @@ Not supported:
 - Never use Zotero's “Delete Collection and Items” operation.
 - Never empty Trash, merge duplicates, or edit title, author, year, DOI, or
   other core bibliographic metadata.
+- Before recommending a manual DOI correction, resolve both values through
+  DOI.org or Crossref and check for a DOI alias. A publisher landing page alone
+  is not enough evidence that the library value is wrong.
 - Never use a third-party MCP server or direct SQLite writes.
 - Do not manage group libraries through the Web API backend.
 
@@ -116,6 +121,32 @@ python "$SKILL_DIR/scripts/zotero_manager.py" plan-items \
   --output ".zotero-management/item-plan-<timestamp>.json"
 ```
 
+For a heterogeneous batch, prepare a JSON array with one exact item key per
+entry. Each optional operation field is an array of strings:
+
+```json
+[
+  {
+    "key": "ABCD2345",
+    "add_collections": ["Macroeconomics"],
+    "remove_collections": ["0 Inbox"]
+  },
+  {
+    "key": "BCDE3456",
+    "add_tags": ["reviewed"],
+    "add_collections": ["Finance"]
+  }
+]
+```
+
+Create one signed plan without composing internal helper calls:
+
+```bash
+python "$SKILL_DIR/scripts/zotero_manager.py" plan-items-manifest \
+  ".zotero-management/item-manifest.json" \
+  --output ".zotero-management/item-plan-<timestamp>.json"
+```
+
 Collection creation:
 
 ```bash
@@ -143,6 +174,17 @@ Collection deletion:
 python "$SKILL_DIR/scripts/zotero_manager.py" plan-collection-delete \
   QRST9876 \
   --output ".zotero-management/delete-plan-<timestamp>.json"
+```
+
+For two or more independent root collections on the Web API backend, create
+one atomic plan so the first deletion cannot invalidate a second approved
+plan. Do not include both an ancestor and its descendant:
+
+```bash
+python "$SKILL_DIR/scripts/zotero_manager.py" plan-collections-delete \
+  QRST9876 RSTU8765 \
+  --backend web --web-profile research \
+  --output ".zotero-management/delete-batch-plan-<timestamp>.json"
 ```
 
 Planning performs only GET requests. If it reports a no-op, ambiguous
@@ -186,8 +228,9 @@ For deletion, also show:
 - confirmation that `items_deleted` is zero.
 
 Deletion needs two explicit values: the approved plan ID and a separate
-delete confirmation equal to the target collection key. A general “yes” is
-insufficient.
+delete confirmation equal to the target collection key. A multi-collection
+plan uses the exact comma-separated key sequence recorded in
+`requires_delete_confirmation`. A general “yes” is insufficient.
 
 ### 4. Apply the unchanged plan
 
@@ -232,6 +275,9 @@ python "$SKILL_DIR/scripts/zotero_manager.py" apply \
   --confirm-delete QRST9876 \
   --receipt ".zotero-management/delete-receipt-<timestamp>.json"
 ```
+
+For a reviewed multi-collection Web plan, pass its exact recorded confirmation
+sequence, for example `--confirm-delete QRST9876,RSTU8765`.
 
 For a `web_api` plan, use the same command with the backend and the exact
 credential profile recorded in the plan:
@@ -322,6 +368,21 @@ If the write succeeded but verification or receipt creation failed, report the
 uncertain state immediately and perform read-only inspection. Never repeat the
 write automatically.
 
+If an item update or collection deletion returns HTTP 5xx or times out after
+submission, the CLI reports an indeterminate outcome with the plan ID. Before
+any retry, inspect the unchanged plan using GET requests only:
+
+```bash
+python "$SKILL_DIR/scripts/zotero_manager.py" inspect-plan-state \
+  ".zotero-management/delete-plan-<timestamp>.json" \
+  --backend web --web-profile research \
+  --output ".zotero-management/delete-inspection-<timestamp>.json"
+```
+
+Retry only when the inspection reports `outcome: not_applied`,
+`safe_to_retry: true`, and the user approves the retry. An `applied` result is
+complete after verification; an `indeterminate` result requires manual review.
+
 ## Safety Rules
 
 - Local requests stay on `http://localhost:23119/api/`. Opted-in Web requests
@@ -343,11 +404,17 @@ write automatically.
 - Do not infer permission to enable, retain, or forget remembered authorization.
 - Preserve complete `tags` and `collections` arrays; Zotero interprets those
   arrays as full replacement values.
+- Compare tags and collection memberships order-insensitively during drift
+  checks and verification. Zotero can return the same values in a different
+  order.
 - Stop on version conflicts, unexpected HTTP responses, malformed results, or
   failed post-write verification.
 - Never apply more than one plan under a single approval.
 - Do not perform a live write merely to test this skill. Use mocked requests in
   development.
+- Keep `.zotero-management/` ignored by default because plans and receipts can
+  contain private library titles and collection paths. Export them deliberately
+  when an external audit record is required.
 
 Read `references/write-safety.md` before troubleshooting authorization,
 versions, collection deletion, or recovery.

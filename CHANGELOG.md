@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **`manage-zotero-library`** accepts reviewed per-item JSON manifests, supports
+  one atomic Web API plan for multiple independent collection deletions, and
+  provides GET-only plan-state inspection after an indeterminate write.
 - **`manage-zotero-library`** now offers an explicit official Zotero Web API
   backend for personal-library tag, membership, and collection changes. Web
   keys are accepted only through a hidden prompt into a recognized OS
@@ -18,6 +21,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   object or library versions, exact plan approval, and post-write verification.
 
 ### Fixed
+- Collection-membership drift checks and verification are now
+  order-insensitive, preventing false failures when Zotero returns the same
+  memberships in a different order. Web delete impact snapshots read only the
+  target collection trees instead of paginating through the entire library.
+- HTTP 5xx and post-submission timeout failures now retain the plan ID and
+  report an indeterminate outcome with an explicit inspection-before-retry
+  path. Local `.zotero-management/` plans and receipts are ignored by default.
 - **`manage-zotero-library`** now fails closed before reading a Web key when
   echo-free terminal input is unavailable, preserves credentials after Web
   write rejection for explicit user action, and guards the complete reviewed

@@ -849,7 +849,7 @@ def test_apply_web_collection_delete_uses_atomic_library_version_guard(
             return web_key_response()
         if request.method == "GET" and request.url.path in {
             "/users/12345/collections",
-            "/users/12345/items/top",
+            "/users/12345/collections/PARENT23/items/top",
         }:
             kind = (
                 "collections" if request.url.path.endswith("collections") else "items"
@@ -909,7 +909,7 @@ def test_web_delete_plan_rejects_inconsistent_impact_snapshot(manager_module):
                 json=[collection("PARENT23", version=10, name="Old Project")],
                 headers={"Last-Modified-Version": "20", "Total-Results": "1"},
             )
-        if request.url.path == "/users/12345/items/top":
+        if request.url.path == "/users/12345/collections/PARENT23/items/top":
             return httpx.Response(
                 200,
                 json=[],
@@ -1790,6 +1790,33 @@ def test_cli_exposes_plan_and_apply_commands(manager_module):
             "delete.json",
         ]
     )
+    manifest_args = parser.parse_args(
+        [
+            "plan-items-manifest",
+            "manifest.json",
+            "--output",
+            "manifest-plan.json",
+        ]
+    )
+    multi_delete_args = parser.parse_args(
+        [
+            "plan-collections-delete",
+            "PARENT23",
+            "SECD2345",
+            "--backend",
+            "web",
+            "--output",
+            "delete-many.json",
+        ]
+    )
+    inspect_args = parser.parse_args(
+        [
+            "inspect-plan-state",
+            "delete.json",
+            "--output",
+            "inspection.json",
+        ]
+    )
     apply_args = parser.parse_args(
         [
             "apply",
@@ -1826,6 +1853,9 @@ def test_cli_exposes_plan_and_apply_commands(manager_module):
 
     assert item_args.command == "plan-items"
     assert delete_args.command == "plan-collection-delete"
+    assert manifest_args.command == "plan-items-manifest"
+    assert multi_delete_args.command == "plan-collections-delete"
+    assert inspect_args.command == "inspect-plan-state"
     assert apply_args.command == "apply"
     assert status_args.command == "auth-status"
     assert forget_args.command == "auth-forget"
@@ -1869,6 +1899,10 @@ def test_skill_declares_read_dependency_and_write_safety_contract():
     assert "environment variable" in manage
     assert "terminal echo cannot be disabled" in manage
     assert "library-versioned multi-object collection" in manage
+    assert "plan-items-manifest" in manage
+    assert "plan-collections-delete" in manage
+    assert "inspect-plan-state" in manage
+    assert "DOI alias" in manage
 
     safety = (SKILL / "references" / "write-safety.md").read_text(encoding="utf-8")
     assert "https://api.zotero.org/" in safety
@@ -1876,6 +1910,468 @@ def test_skill_declares_read_dependency_and_write_safety_contract():
     assert "versioned writes" in safety
     assert "Group permissions do not substitute" in safety
     assert "preserve the selected stored profile" in safety
+    assert "outcome is indeterminate" in safety
+    assert "order-insensitive" in safety
 
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     assert '"keyring>=' in pyproject
+    assert ".zotero-management/" in (ROOT / ".gitignore").read_text(
+        encoding="utf-8"
+    )
+
+
+def test_item_apply_treats_collection_memberships_as_order_insensitive(
+    manager_module,
+):
+    item_reads = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal item_reads
+        if request.url.path == "/keys/current":
+            return web_key_response()
+        if request.url.path == "/users/12345/items/ITEM2345":
+            item_reads += 1
+            memberships = (
+                ["COLLBBBB", "COLLAAAA"]
+                if item_reads == 1
+                else ["COLLCCCC", "COLLBBBB", "COLLAAAA"]
+            )
+            return httpx.Response(
+                200,
+                json=item(
+                    "ITEM2345",
+                    version=12 if item_reads == 1 else 13,
+                    title="Paper",
+                    tags=[{"tag": "second"}, {"tag": "first"}],
+                    collections=memberships,
+                ),
+            )
+        if request.url.path == "/users/12345/items":
+            assert request.method == "POST"
+            return httpx.Response(
+                200,
+                json={"successful": {"0": "ITEM2345"}, "failed": {}},
+            )
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    plan = manager_module.sign_plan(
+        {
+            "schema_version": 1,
+            "action": "update_items",
+            "api_backend": "web",
+            "application_mode": "web_api",
+            "library": {"type": "user", "id": 12345},
+            "web_profile": "research",
+            "changes": [
+                {
+                    "key": "ITEM2345",
+                    "title": "Paper",
+                    "version": 12,
+                    "before": {
+                        "tags": [{"tag": "first"}, {"tag": "second"}],
+                        "collections": ["COLLAAAA", "COLLBBBB"],
+                    },
+                    "after": {
+                        "tags": [{"tag": "first"}, {"tag": "second"}],
+                        "collections": ["COLLAAAA", "COLLBBBB", "COLLCCCC"],
+                    },
+                }
+            ],
+        }
+    )
+    with manager_module.ManageZotero(
+        backend="web",
+        web_profile="research",
+        transport=httpx.MockTransport(handler),
+        credential_store=FakeCredentialStore({"research": "WEB-SECRET"}),
+    ) as client:
+        receipt = client.apply_plan(plan, approval=plan["plan_id"])
+
+    assert receipt["verified"] is True
+    assert receipt["verification"] == [{"key": "ITEM2345", "verified": True}]
+
+
+def test_plan_items_manifest_supports_different_changes_per_item(manager_module):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/keys/current":
+            return web_key_response()
+        if request.url.path == "/users/12345/collections":
+            records = [
+                collection("COLLAAAA", version=4, name="Macro"),
+                collection("COLLBBBB", version=5, name="Finance"),
+            ]
+            return httpx.Response(
+                200,
+                json=records,
+                headers={"Last-Modified-Version": "20", "Total-Results": "2"},
+            )
+        if request.url.path == "/users/12345/items/ITEM2345":
+            return httpx.Response(
+                200,
+                json=item("ITEM2345", version=10, title="Macro paper"),
+            )
+        if request.url.path == "/users/12345/items/ITEM2346":
+            return httpx.Response(
+                200,
+                json=item("ITEM2346", version=11, title="Finance paper"),
+            )
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    manifest = [
+        {"key": "ITEM2345", "add_collections": ["Macro"]},
+        {
+            "key": "ITEM2346",
+            "add_collections": ["Finance"],
+            "add_tags": ["reviewed"],
+        },
+    ]
+    with manager_module.ManageZotero(
+        backend="web",
+        web_profile="research",
+        transport=httpx.MockTransport(handler),
+        credential_store=FakeCredentialStore({"research": "WEB-SECRET"}),
+    ) as client:
+        plan = client.plan_items_manifest(manifest)
+
+    assert [change["key"] for change in plan["changes"]] == [
+        "ITEM2345",
+        "ITEM2346",
+    ]
+    assert plan["changes"][0]["after"]["collections"] == ["COLLAAAA"]
+    assert plan["changes"][1]["after"] == {
+        "tags": [{"tag": "reviewed"}],
+        "collections": ["COLLBBBB"],
+    }
+
+
+def test_web_delete_snapshot_reads_only_target_collection_items(manager_module):
+    requested_paths: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requested_paths.append(request.url.path)
+        if request.url.path == "/keys/current":
+            return web_key_response()
+        if request.url.path == "/users/12345/collections":
+            records = [
+                collection("PARENT23", version=4, name="Parent"),
+                collection(
+                    "CHILD234",
+                    version=5,
+                    name="Child",
+                    parent="PARENT23",
+                ),
+            ]
+            return httpx.Response(
+                200,
+                json=records,
+                headers={"Last-Modified-Version": "20", "Total-Results": "2"},
+            )
+        if request.url.path == "/users/12345/collections/PARENT23/items/top":
+            records = [
+                item(
+                    "ITEM2345",
+                    version=10,
+                    title="Parent paper",
+                    collections=["PARENT23"],
+                )
+            ]
+            return httpx.Response(
+                200,
+                json=records,
+                headers={"Last-Modified-Version": "20", "Total-Results": "1"},
+            )
+        if request.url.path == "/users/12345/collections/CHILD234/items/top":
+            records = [
+                item(
+                    "ITEM2346",
+                    version=11,
+                    title="Child paper",
+                    collections=["CHILD234"],
+                )
+            ]
+            return httpx.Response(
+                200,
+                json=records,
+                headers={"Last-Modified-Version": "20", "Total-Results": "1"},
+            )
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    with manager_module.ManageZotero(
+        backend="web",
+        web_profile="research",
+        transport=httpx.MockTransport(handler),
+        credential_store=FakeCredentialStore({"research": "WEB-SECRET"}),
+    ) as client:
+        plan = client.plan_collection_delete("PARENT23")
+
+    assert plan["impact"] == {
+        "deleted_collection_count": 2,
+        "affected_item_count": 2,
+        "becomes_unfiled_count": 2,
+        "items_deleted": 0,
+    }
+    assert "/users/12345/items/top" not in requested_paths
+
+
+def test_web_multi_collection_delete_is_one_versioned_write(manager_module):
+    deleted = False
+    delete_requests = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal deleted, delete_requests
+        if request.url.path == "/keys/current":
+            return web_key_response()
+        if request.url.path == "/users/12345/collections":
+            if request.method == "DELETE":
+                delete_requests += 1
+                assert request.url.params["collectionKey"] == "PARENT23,SECD2345"
+                assert request.headers["If-Unmodified-Since-Version"] == "20"
+                deleted = True
+                return httpx.Response(204)
+            records = [
+                collection("PARENT23", version=4, name="First"),
+                collection("SECD2345", version=5, name="Second"),
+            ]
+            return httpx.Response(
+                200,
+                json=records,
+                headers={"Last-Modified-Version": "20", "Total-Results": "2"},
+            )
+        if request.url.path.endswith("/items/top"):
+            return httpx.Response(
+                200,
+                json=[],
+                headers={"Last-Modified-Version": "20", "Total-Results": "0"},
+            )
+        if request.url.path in {
+            "/users/12345/collections/PARENT23",
+                "/users/12345/collections/SECD2345",
+        }:
+            return httpx.Response(404 if deleted else 200)
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    with manager_module.ManageZotero(
+        backend="web",
+        web_profile="research",
+        transport=httpx.MockTransport(handler),
+        credential_store=FakeCredentialStore({"research": "WEB-SECRET"}),
+    ) as client:
+        plan = client.plan_collections_delete(["PARENT23", "SECD2345"])
+        receipt = client.apply_plan(
+            plan,
+            approval=plan["plan_id"],
+            confirm_delete="PARENT23,SECD2345",
+        )
+
+    assert plan["action"] == "delete_collections"
+    assert plan["requires_delete_confirmation"] == "PARENT23,SECD2345"
+    assert receipt["verified"] is True
+    assert receipt["items_deleted"] == 0
+    assert delete_requests == 1
+
+
+def test_inspect_delete_plan_state_distinguishes_safe_retry(manager_module):
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/keys/current":
+            return web_key_response()
+        if request.url.path == "/users/12345/collections":
+            records = [collection("PARENT23", version=4, name="Parent")]
+            return httpx.Response(
+                200,
+                json=records,
+                headers={"Last-Modified-Version": "20", "Total-Results": "1"},
+            )
+        if request.url.path == "/users/12345/collections/PARENT23/items/top":
+            return httpx.Response(
+                200,
+                json=[],
+                headers={"Last-Modified-Version": "20", "Total-Results": "0"},
+            )
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    plan = manager_module.sign_plan(
+        {
+            "schema_version": 1,
+            "action": "delete_collection",
+            "api_backend": "web",
+            "application_mode": "web_api",
+            "library": {"type": "user", "id": 12345},
+            "web_profile": "research",
+            "target": {"key": "PARENT23", "path": "Parent", "version": 4},
+            "collection_snapshot": [
+                {
+                    "key": "PARENT23",
+                    "version": 4,
+                    "name": "Parent",
+                    "parentCollection": False,
+                    "path": "Parent",
+                }
+            ],
+            "affected_items": [],
+            "impact": {
+                "deleted_collection_count": 1,
+                "affected_item_count": 0,
+                "becomes_unfiled_count": 0,
+                "items_deleted": 0,
+            },
+            "expected_library_version": 20,
+            "requires_delete_confirmation": "PARENT23",
+        }
+    )
+    with manager_module.ManageZotero(
+        backend="web",
+        web_profile="research",
+        transport=httpx.MockTransport(handler),
+        credential_store=FakeCredentialStore({"research": "WEB-SECRET"}),
+    ) as client:
+        result = client.inspect_plan_state(plan)
+
+    assert result == {
+        "plan_id": plan["plan_id"],
+        "action": "delete_collection",
+        "outcome": "not_applied",
+        "safe_to_retry": True,
+        "verified": True,
+    }
+
+
+def test_cli_reports_indeterminate_context_after_web_delete_502(
+    manager_module,
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    plan = manager_module.sign_plan(
+        {
+            "schema_version": 1,
+            "action": "delete_collection",
+            "api_backend": "web",
+            "application_mode": "web_api",
+            "library": {"type": "user", "id": 12345},
+            "web_profile": "research",
+            "target": {"key": "PARENT23", "path": "Parent", "version": 4},
+            "collection_snapshot": [],
+            "affected_items": [],
+            "impact": {
+                "deleted_collection_count": 1,
+                "affected_item_count": 0,
+                "becomes_unfiled_count": 0,
+                "items_deleted": 0,
+            },
+            "expected_library_version": 20,
+            "requires_delete_confirmation": "PARENT23",
+        }
+    )
+    plan_path = tmp_path / "delete-plan.json"
+    plan_path.write_text(json.dumps(plan), encoding="utf-8")
+    receipt_path = tmp_path / "receipt.json"
+
+    class FailingClient:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def apply_plan(self, *args, **kwargs):
+            request = httpx.Request("DELETE", "https://api.zotero.org/collections")
+            response = httpx.Response(502, request=request)
+            raise httpx.HTTPStatusError(
+                "Bad gateway",
+                request=request,
+                response=response,
+            )
+
+    monkeypatch.setattr(
+        manager_module,
+        "ManageZotero",
+        lambda **kwargs: FailingClient(),
+    )
+    result = manager_module.main(
+        [
+            "apply",
+            str(plan_path),
+            "--backend",
+            "web",
+            "--web-profile",
+            "research",
+            "--approve",
+            plan["plan_id"],
+            "--confirm-delete",
+            "PARENT23",
+            "--receipt",
+            str(receipt_path),
+        ]
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    assert result == 1
+    assert output == {
+        "error": "Zotero write outcome is indeterminate after HTTP 502",
+        "outcome": "indeterminate",
+        "plan_id": plan["plan_id"],
+        "action": "delete_collection",
+        "safe_to_retry": False,
+        "next_step": "Run inspect-plan-state before any retry",
+    }
+    assert not receipt_path.exists()
+
+
+def test_inspect_item_plan_state_reports_applied_without_writing(manager_module):
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/keys/current":
+            return web_key_response()
+        if request.url.path == "/users/12345/items/ITEM2345":
+            return httpx.Response(
+                200,
+                json=item(
+                    "ITEM2345",
+                    version=13,
+                    title="Paper",
+                    tags=[{"tag": "reviewed"}],
+                    collections=["COLLAAAA"],
+                ),
+            )
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    plan = manager_module.sign_plan(
+        {
+            "schema_version": 1,
+            "action": "update_items",
+            "api_backend": "web",
+            "application_mode": "web_api",
+            "library": {"type": "user", "id": 12345},
+            "web_profile": "research",
+            "changes": [
+                {
+                    "key": "ITEM2345",
+                    "title": "Paper",
+                    "version": 12,
+                    "before": {"tags": [], "collections": []},
+                    "after": {
+                        "tags": [{"tag": "reviewed"}],
+                        "collections": ["COLLAAAA"],
+                    },
+                }
+            ],
+        }
+    )
+    with manager_module.ManageZotero(
+        backend="web",
+        web_profile="research",
+        transport=httpx.MockTransport(handler),
+        credential_store=FakeCredentialStore({"research": "WEB-SECRET"}),
+    ) as client:
+        result = client.inspect_plan_state(plan)
+
+    assert result == {
+        "plan_id": plan["plan_id"],
+        "action": "update_items",
+        "outcome": "applied",
+        "safe_to_retry": False,
+        "verified": True,
+    }
+    assert {request.method for request in requests} == {"GET"}
