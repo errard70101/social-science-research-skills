@@ -7,7 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **`manage-zotero-library`** now offers an explicit official Zotero Web API
+  backend for personal-library tag, membership, and collection changes. Web
+  keys are accepted only through a hidden prompt into a recognized OS
+  credential store, validated with `/keys/current` for personal-library write
+  scope, and bound to a user ID and named credential profile in every plan.
+- Web API status and forget commands operate on one credential profile without
+  exposing the key. Web writes use the bound `/users/<userID>` library,
+  object or library versions, exact plan approval, and post-write verification.
+
 ### Fixed
+- **`manage-zotero-library`** now fails closed before reading a Web key when
+  echo-free terminal input is unavailable, preserves credentials after Web
+  write rejection for explicit user action, and guards the complete reviewed
+  collection-delete cascade with Zotero's library-versioned batch endpoint.
 - **`manage-zotero-library`** now gates Local API writes on the live
   `Zotero-Server-ID` capability signal. GET-only Zotero versions can still
   produce reviewable plans, but those plans are routed to manual Zotero Desktop

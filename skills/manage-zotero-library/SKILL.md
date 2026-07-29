@@ -1,6 +1,6 @@
 ---
 name: manage-zotero-library
-description: "Safely organize a user's personal Zotero library by preparing reviewable plans and, when the running Zotero exposes official Local API write support, applying approved tag, collection-membership, and collection changes. On GET-only Zotero versions, keep planning available but require the user to apply the plan in Zotero Desktop. Also use for Desktop-first PDF import guidance. Supports runtime capability checks, exact approval, concurrency checks, delete-specific confirmation, post-change verification, and durable receipts. Never deletes Zotero items or attachments."
+description: "Safely organize a user's personal Zotero library with reviewable plans and approved tag, collection-membership, and collection changes. Uses the Local API by default, with an opt-in official Zotero Web API backend whose key stays in a recognized OS credential store. On GET-only Local API versions, require manual Zotero Desktop application. Also use for Desktop-first PDF import guidance. Supports exact approval, version checks, delete confirmation, verification, and receipts. Never deletes Zotero items or attachments."
 metadata:
   requires: [zotero-read]
 ---
@@ -10,8 +10,9 @@ metadata:
 Organize the researcher's Zotero library through a strict
 plan-review-approve-apply-verify workflow. Use the read-capability skill to find
 items and collections; use this skill only for approved organization changes.
-The helper detects Local API write support at runtime and never assumes that an
-installed Zotero version has received a newly documented API feature.
+The helper uses the Local API by default and detects local write support at
+runtime. The official Web API is an explicit alternative for a personal
+library; it is never selected automatically.
 
 Before running the bundled script, locate this skill directory and
 assign its absolute path to `SKILL_DIR`.
@@ -34,7 +35,8 @@ Not supported:
 - Never use Zotero's “Delete Collection and Items” operation.
 - Never empty Trash, merge duplicates, or edit title, author, year, DOI, or
   other core bibliographic metadata.
-- Never use the Web API, a third-party MCP server, or direct SQLite writes.
+- Never use a third-party MCP server or direct SQLite writes.
+- Do not manage group libraries through the Web API backend.
 
 ## Bulk PDF import guidance
 
@@ -84,6 +86,24 @@ Summarize the requested operation and exact targets before planning.
 Choose a new, project-local JSON path for every plan. The helper creates parent
 directories but refuses to overwrite an existing file.
 
+Keep the default Local API unless the user explicitly opts in to the official
+Web API. Before the first Web API plan, have the user create a key at Zotero's
+[API Keys](https://www.zotero.org/settings/keys) page with personal-library
+write access, then store it under a non-secret profile name:
+
+```bash
+python "$SKILL_DIR/scripts/zotero_manager.py" web-auth-store \
+  --web-profile research
+```
+
+The command prompts for the key without echoing it, calls `/keys/current`, and
+stores it only after confirming the returned user ID and personal-library
+`library: true` and `write: true` access. If terminal echo cannot be disabled,
+the command stops before reading the key or initializing a Web API client.
+Never place the key in a command-line argument, environment variable, plan,
+receipt, chat, log, or repository file. If no recognized OS credential store
+is available, Web API use is blocked.
+
 Tags and memberships:
 
 ```bash
@@ -129,6 +149,13 @@ Planning performs only GET requests. If it reports a no-op, ambiguous
 collection, child attachment/note, or more than 50 item updates, stop and
 revise the request rather than bypassing the check.
 
+For an explicitly selected Web API operation, add the same two options to any
+planning command:
+
+```bash
+--backend web --web-profile research
+```
+
 Inspect these plan fields before presenting an apply path:
 
 - `local_api_write_supported: true` and `application_mode: local_api` mean the
@@ -137,6 +164,9 @@ Inspect these plan fields before presenting an apply path:
 - `local_api_write_supported: false` and
   `application_mode: manual_zotero_desktop` mean the running Zotero is still
   GET-only. The plan remains reviewable, but the helper cannot apply it.
+- `api_backend: web`, `application_mode: web_api`, `library`, and
+  `web_profile` bind an opted-in Web plan to the user ID returned by
+  `/keys/current` and to the named OS credential profile.
 
 Do not infer capability from a Zotero version number or from online
 documentation alone. The current runtime response is authoritative.
@@ -203,9 +233,31 @@ python "$SKILL_DIR/scripts/zotero_manager.py" apply \
   --receipt ".zotero-management/delete-receipt-<timestamp>.json"
 ```
 
+For a `web_api` plan, use the same command with the backend and the exact
+credential profile recorded in the plan:
+
+```bash
+python "$SKILL_DIR/scripts/zotero_manager.py" apply \
+  ".zotero-management/item-plan-<timestamp>.json" \
+  --backend web \
+  --web-profile research \
+  --approve EXACT_PLAN_ID \
+  --receipt ".zotero-management/item-receipt-<timestamp>.json"
+```
+
+The helper revalidates `/keys/current` before applying, rejects a different
+user ID or credential profile, and sends only versioned writes. It never calls
+`/local/authorize` for Web API plans. Revoked or insufficient keys stop the
+operation without an automatic write retry. A `401` or `403` write rejection
+does not remove the stored profile; inspect it with `web-auth-status` and use
+`web-auth-forget` only after the user explicitly requests removal.
+
 The helper checks the Zotero database identity and current versions before
 requesting authorization. It rechecks item state after the authorization
 dialog; for deletion, it rechecks the full cascade immediately before DELETE.
+Web delete plans bind the complete tree-and-membership impact snapshot to one
+library version and use Zotero's library-versioned multi-object collection
+DELETE, so intervening library-wide drift makes the write fail atomically.
 If state drift is detected, do not retry or patch the plan. Prepare a fresh
 plan and request approval again.
 
@@ -235,6 +287,20 @@ action revokes all remembered local write authorizations, not only this skill's
 key. Unchecking local application access disables the entire Local API,
 including reads.
 
+For an opted-in Web API profile, inspect or remove only that profile's stored
+credential:
+
+```bash
+python "$SKILL_DIR/scripts/zotero_manager.py" web-auth-status \
+  --web-profile research
+python "$SKILL_DIR/scripts/zotero_manager.py" web-auth-forget \
+  --web-profile research
+```
+
+`web-auth-forget` removes the local credential but does not revoke the key on
+zotero.org. The user revokes it from Zotero's API Keys settings. Do not infer
+permission to store, retain, remove, or revoke a Web API key.
+
 ### 6. Verify and report
 
 For a `manual_zotero_desktop` plan, wait until the user confirms that the
@@ -245,11 +311,12 @@ affected item still exists with its planned remaining memberships. Report the
 plan ID, changed keys, `application_mode`, and comparison result. Do not claim
 that the helper produced a receipt or an `authorization_mode` for a manual change.
 
-For a `local_api` plan, the helper re-reads every changed object. Treat the
-operation as complete only when the receipt says `"verified": true`. Report the
-receipt path, plan ID, changed keys, `authorization_mode`, and verification
-result. A delete receipt includes a reconstruction snapshot because deleting a
-collection is not automatically reversible.
+For a `local_api` or `web_api` plan, the helper re-reads every changed object.
+Treat the operation as complete only when the receipt says `"verified": true`.
+Report the receipt path, plan ID, changed keys, backend, library binding,
+`authorization_mode`, and verification result. A delete receipt includes a
+reconstruction snapshot because deleting a collection is not automatically
+reversible.
 
 If the write succeeded but verification or receipt creation failed, report the
 uncertain state immediately and perform read-only inspection. Never repeat the
@@ -257,14 +324,20 @@ write automatically.
 
 ## Safety Rules
 
-- Keep every request on `http://localhost:23119/api/`; the helper rejects other
-  hosts, ports, schemes, and paths.
+- Local requests stay on `http://localhost:23119/api/`. Opted-in Web requests
+  stay on `https://api.zotero.org/`. The helper rejects every other host, port,
+  scheme, and path.
 - Treat the presence of `Zotero-Server-ID` on the live Local API response as
   the write-capability gate. A missing header keeps the helper in GET-only
   planning mode and must stop authorization and apply before any write request.
 - Never print, commit, or place a local API key in a plan, receipt, environment
   file, or repository. One-time keys remain only in process memory; remembered
   keys may be stored only in a recognized system credential store.
+- Never print, commit, or place a Web API key in arguments, plans, receipts,
+  environment variables, logs, chat, or repository files. Store it only under
+  the selected profile in a recognized system credential store, and validate
+  personal-library write scope through `/keys/current` before planning or
+  applying.
 - Do not treat a plan file as authorization. Require the exact plan ID supplied
   by the user after review.
 - Do not infer permission to enable, retain, or forget remembered authorization.
@@ -281,7 +354,9 @@ versions, collection deletion, or recovery.
 
 ## Dependencies
 
-Use Python 3.10 or newer with `httpx` and `keyring`. Zotero Desktop must be
-running with “Allow other applications on this computer to communicate with
-Zotero” enabled. The `zotero-read` capability is required for target discovery
-and is installed automatically with this skill by the repository installer.
+Use Python 3.10 or newer with `httpx` and `keyring`. Local API use requires
+Zotero Desktop to be running with “Allow other applications on this computer
+to communicate with Zotero” enabled. Web API use requires network access and a
+recognized OS credential store. The `zotero-read` capability is required for
+target discovery and is installed automatically with this skill by the
+repository installer.

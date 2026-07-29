@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import argparse
+import getpass
 import hashlib
 import ipaddress
 import json
 import re
+import warnings
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol
@@ -28,9 +30,11 @@ except ImportError:  # pragma: no cover - exercised in environments without extr
 
 LOCAL_API_BASE = "http://localhost:23119/api/"
 LOCAL_API_PORT = 23119
+WEB_API_BASE = "https://api.zotero.org/"
 API_HEADERS = {"Zotero-API-Version": "3"}
 APP_NAME = "Social Science Research Skills"
-KEYRING_SERVICE = "social-science-research-skills.zotero-local-api"
+LOCAL_KEYRING_SERVICE = "social-science-research-skills.zotero-local-api"
+WEB_KEYRING_SERVICE = "social-science-research-skills.zotero-web-api"
 PLAN_SCHEMA_VERSION = 1
 MAX_BATCH_ITEMS = 50
 PAGE_SIZE = 100
@@ -57,7 +61,7 @@ class PlanDriftError(ZoteroManagementError):
 
 
 class AuthorizationError(ZoteroManagementError):
-    """A one-time or remembered local write authorization cannot be used."""
+    """A Zotero write authorization cannot be used safely."""
 
 
 class PlanIntegrityError(ZoteroManagementError):
@@ -69,18 +73,21 @@ class CredentialStoreUnavailable(AuthorizationError):
 
 
 class CredentialStore(Protocol):
-    def get(self, server_id: str) -> str | None:
+    def get(self, credential_id: str) -> str | None:
         """Return a remembered key without exposing it to output."""
 
-    def set(self, server_id: str, key: str) -> None:
-        """Save a remembered key for one Zotero database."""
+    def set(self, credential_id: str, key: str) -> None:
+        """Save a key under a non-secret server or profile identifier."""
 
-    def delete(self, server_id: str) -> bool:
+    def delete(self, credential_id: str) -> bool:
         """Delete a remembered key and report whether one existed."""
 
 
 class SystemCredentialStore:
     """Store Zotero keys only in recognized operating-system secret stores."""
+
+    def __init__(self, service: str = LOCAL_KEYRING_SERVICE) -> None:
+        self.service = service
 
     @staticmethod
     def _backend() -> object:
@@ -107,7 +114,7 @@ class SystemCredentialStore:
     def get(self, server_id: str) -> str | None:
         backend = self._backend()
         try:
-            value = backend.get_password(KEYRING_SERVICE, server_id)
+            value = backend.get_password(self.service, server_id)
         except KeyringError as exc:
             raise CredentialStoreUnavailable(
                 "Could not read the operating-system credential store"
@@ -117,7 +124,7 @@ class SystemCredentialStore:
     def set(self, server_id: str, key: str) -> None:
         backend = self._backend()
         try:
-            backend.set_password(KEYRING_SERVICE, server_id, key)
+            backend.set_password(self.service, server_id, key)
         except KeyringError as exc:
             raise CredentialStoreUnavailable(
                 "Could not save the remembered Zotero authorization"
@@ -126,10 +133,10 @@ class SystemCredentialStore:
     def delete(self, server_id: str) -> bool:
         backend = self._backend()
         try:
-            existing = backend.get_password(KEYRING_SERVICE, server_id)
+            existing = backend.get_password(self.service, server_id)
             if not existing:
                 return False
-            backend.delete_password(KEYRING_SERVICE, server_id)
+            backend.delete_password(self.service, server_id)
         except PasswordDeleteError:
             return False
         except KeyringError as exc:
@@ -147,6 +154,19 @@ class JsonArgumentParser(argparse.ArgumentParser):
 
 def print_json(value: object) -> None:
     print(json.dumps(value, ensure_ascii=False, indent=2))
+
+
+def prompt_web_api_key() -> str:
+    """Read a Web API key only when terminal echo can be disabled."""
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", getpass.GetPassWarning)
+            return getpass.getpass("Zotero Web API key: ")
+    except getpass.GetPassWarning as exc:
+        raise AuthorizationError(
+            "Cannot accept a Zotero Web API key without echo-free terminal "
+            "input. Run web-auth-store from an interactive terminal."
+        ) from exc
 
 
 def _now() -> str:
@@ -175,9 +195,7 @@ def validate_local_api_base(base_url: str) -> str:
     except ValueError as exc:
         raise ValueError("Zotero Local API base URL has an invalid port") from exc
     if port != LOCAL_API_PORT:
-        raise ValueError(
-            f"Zotero Local API base URL must use port {LOCAL_API_PORT}"
-        )
+        raise ValueError(f"Zotero Local API base URL must use port {LOCAL_API_PORT}")
     if parsed.query or parsed.fragment:
         raise ValueError(
             "Zotero Local API base URL must not contain a query or fragment"
@@ -185,6 +203,23 @@ def validate_local_api_base(base_url: str) -> str:
     if parsed.path.rstrip("/") != "/api":
         raise ValueError("Zotero Local API base URL must end with /api/")
     return base_url.rstrip("/") + "/"
+
+
+def validate_web_api_base(base_url: str) -> str:
+    parsed = urlsplit(base_url)
+    if parsed.scheme != "https" or parsed.hostname != "api.zotero.org":
+        raise ValueError("Zotero Web API base URL must be https://api.zotero.org/")
+    if parsed.username is not None or parsed.password is not None:
+        raise ValueError("Zotero Web API base URL must not contain credentials")
+    try:
+        port = parsed.port
+    except ValueError as exc:
+        raise ValueError("Zotero Web API base URL has an invalid port") from exc
+    if port not in {None, 443}:
+        raise ValueError("Zotero Web API base URL must use the HTTPS default port")
+    if parsed.query or parsed.fragment or parsed.path.rstrip("/"):
+        raise ValueError("Zotero Web API base URL must be https://api.zotero.org/")
+    return WEB_API_BASE
 
 
 def normalize_key(value: str, *, kind: str) -> str:
@@ -227,9 +262,7 @@ def build_collection_paths(
         if key in paths:
             return paths[key]
         if key in ancestors:
-            raise ZoteroManagementError(
-                "Zotero collection hierarchy contains a cycle"
-            )
+            raise ZoteroManagementError("Zotero collection hierarchy contains a cycle")
         collection = records[key]
         name = _collection_name(collection)
         if not name:
@@ -262,9 +295,7 @@ def resolve_collection_key(
         for collection in collections
         if collection.get("key")
     }
-    key_matches = [
-        key for key in by_key if key.casefold() == requested.casefold()
-    ]
+    key_matches = [key for key in by_key if key.casefold() == requested.casefold()]
     if len(key_matches) == 1:
         return key_matches[0]
 
@@ -273,9 +304,7 @@ def resolve_collection_key(
         raise ValueError("Collection name cannot be empty")
     paths = build_collection_paths(collections)
     path_matches = [
-        key
-        for key, path in paths.items()
-        if path.casefold() == normalized.casefold()
+        key for key, path in paths.items() if path.casefold() == normalized.casefold()
     ]
     if len(path_matches) == 1:
         return path_matches[0]
@@ -283,8 +312,7 @@ def resolve_collection_key(
         name_matches = [
             key
             for key, path in paths.items()
-            if path.rsplit(" / ", maxsplit=1)[-1].casefold()
-            == normalized.casefold()
+            if path.rsplit(" / ", maxsplit=1)[-1].casefold() == normalized.casefold()
         ]
         if len(name_matches) == 1:
             return name_matches[0]
@@ -349,39 +377,54 @@ def _response_json(response: httpx.Response, context: str) -> object:
         return response.json()
     except ValueError as exc:
         raise ZoteroManagementError(
-            f"Zotero Local API returned invalid JSON for {context}"
+            f"Zotero API returned invalid JSON for {context}"
         ) from exc
 
 
 def _response_version(response: httpx.Response) -> int:
     value = response.headers.get("Last-Modified-Version", "")
     if not value.isdecimal():
-        raise ZoteroManagementError(
-            "Zotero Local API did not report Last-Modified-Version"
-        )
+        raise ZoteroManagementError("Zotero API did not report Last-Modified-Version")
     return int(value)
 
 
 class ManageZotero:
-    """Plan and apply narrowly scoped Zotero Local API writes."""
+    """Plan and apply narrowly scoped Zotero API writes."""
 
     def __init__(
         self,
         *,
-        base_url: str = LOCAL_API_BASE,
+        backend: str = "local",
+        base_url: str | None = None,
+        web_profile: str = "default",
         timeout: float = 15.0,
         transport: httpx.BaseTransport | None = None,
         credential_store: CredentialStore | None | object = AUTO_CREDENTIAL_STORE,
     ) -> None:
-        self.base_url = validate_local_api_base(base_url)
+        if backend not in {"local", "web"}:
+            raise ValueError("Zotero API backend must be 'local' or 'web'")
+        self.backend = backend
+        if backend == "local":
+            self.base_url = validate_local_api_base(base_url or LOCAL_API_BASE)
+        else:
+            self.base_url = validate_web_api_base(base_url or WEB_API_BASE)
+        self.web_profile = web_profile.strip()
+        if backend == "web" and not self.web_profile:
+            raise ValueError("Zotero Web API credential profile cannot be blank")
         if credential_store is AUTO_CREDENTIAL_STORE:
             self._credential_store: CredentialStore | None = (
-                SystemCredentialStore() if transport is None else None
+                SystemCredentialStore(
+                    WEB_KEYRING_SERVICE if backend == "web" else LOCAL_KEYRING_SERVICE
+                )
+                if transport is None
+                else None
             )
         else:
             self._credential_store = credential_store  # type: ignore[assignment]
         self.authorization_mode = "none"
         self._authorization_server_id: str | None = None
+        self._web_api_key: str | None = None
+        self._web_identity: dict[str, object] | None = None
         self._client = httpx.Client(
             headers=API_HEADERS,
             timeout=timeout,
@@ -398,6 +441,7 @@ class ManageZotero:
 
     def close(self) -> None:
         self._client.close()
+        self._web_api_key = None
 
     def _url(self, path: str) -> str:
         return self.base_url + path.lstrip("/")
@@ -411,14 +455,17 @@ class ManageZotero:
         json_body: object | None = None,
         headers: dict[str, str] | None = None,
     ) -> httpx.Response:
+        request_headers = dict(headers or {})
+        if self.backend == "web" and "Zotero-API-Key" not in request_headers:
+            request_headers["Zotero-API-Key"] = self._stored_web_key()
         response = self._client.request(
             method,
             self._url(path),
             params=params,
             json=json_body,
-            headers=headers,
+            headers=request_headers,
         )
-        if response.status_code == 403 and method == "GET":
+        if self.backend == "local" and response.status_code == 403 and method == "GET":
             raise ZoteroManagementError(
                 "Zotero Local API is disabled. Enable local application access "
                 "in Zotero Settings → Advanced."
@@ -432,10 +479,19 @@ class ManageZotero:
 
     def planning_context(self) -> dict[str, object]:
         """Describe whether the running Zotero can apply a generated plan."""
+        if self.backend == "web":
+            identity = self._ensure_web_identity()
+            return {
+                "api_backend": "web",
+                "application_mode": "web_api",
+                "library": {"type": "user", "id": identity["user_id"]},
+                "web_profile": self.web_profile,
+            }
         response = self._request("GET", "")
         server_id = response.headers.get("Zotero-Server-ID", "").strip()
         write_supported = bool(server_id)
         return {
+            "api_backend": "local",
             "server_id": server_id or None,
             "local_api_write_supported": write_supported,
             "application_mode": (
@@ -444,6 +500,10 @@ class ManageZotero:
         }
 
     def server_id(self) -> str:
+        if self.backend != "local":
+            raise ZoteroManagementError(
+                "Zotero-Server-ID applies only to the Local API backend"
+            )
         context = self.planning_context()
         server_id = context["server_id"]
         if not isinstance(server_id, str):
@@ -453,8 +513,79 @@ class ManageZotero:
             )
         return server_id
 
+    def _stored_web_key(self) -> str:
+        if self.backend != "web":
+            raise AuthorizationError(
+                "Web API credentials are unavailable on the Local API backend"
+            )
+        if self._web_api_key:
+            return self._web_api_key
+        if self._credential_store is None:
+            raise CredentialStoreUnavailable(
+                "A recognized operating-system credential store is required "
+                "for Zotero Web API keys"
+            )
+        try:
+            api_key = self._credential_store.get(self.web_profile)
+        except CredentialStoreUnavailable:
+            raise
+        if not api_key:
+            raise AuthorizationError(
+                "No Zotero Web API key is stored for credential profile "
+                f"{self.web_profile!r}. Run web-auth-store first."
+            )
+        self._web_api_key = api_key
+        return api_key
+
+    def _validate_web_key(self, api_key: str) -> dict[str, object]:
+        try:
+            response = self._request(
+                "GET",
+                "keys/current",
+                headers={"Zotero-API-Key": api_key},
+            )
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code in {401, 403}:
+                raise AuthorizationError(
+                    "The Zotero Web API key is invalid or lacks personal-library "
+                    "write access"
+                ) from exc
+            raise
+        payload = _response_json(response, "Web API key validation")
+        if not isinstance(payload, dict):
+            raise AuthorizationError("Zotero returned malformed API key metadata")
+        user_id = payload.get("userID")
+        access = payload.get("access")
+        user_access = access.get("user") if isinstance(access, dict) else None
+        if (
+            not isinstance(user_id, int)
+            or isinstance(user_id, bool)
+            or user_id <= 0
+            or not isinstance(user_access, dict)
+            or user_access.get("library") is not True
+            or user_access.get("write") is not True
+        ):
+            raise AuthorizationError(
+                "The Zotero Web API key does not have personal-library write access"
+            )
+        return {
+            "user_id": user_id,
+            "username": str(payload.get("username") or ""),
+        }
+
+    def _ensure_web_identity(self) -> dict[str, object]:
+        if self._web_identity is None:
+            self._web_identity = self._validate_web_key(self._stored_web_key())
+        return self._web_identity
+
+    def _library_path(self, path: str) -> str:
+        if self.backend == "web":
+            user_id = self._ensure_web_identity()["user_id"]
+            return f"users/{user_id}/{path.lstrip('/')}"
+        return f"users/0/{path.lstrip('/')}"
+
     def _get_item(self, key: str) -> dict[str, object]:
-        payload = self._get_json(f"users/0/items/{key}")
+        payload = self._get_json(self._library_path(f"items/{key}"))
         if not isinstance(payload, dict):
             raise ZoteroManagementError(f"Zotero item {key} is malformed")
         return payload
@@ -462,14 +593,15 @@ class ManageZotero:
     def _get_collections(
         self,
     ) -> tuple[list[dict[str, object]], httpx.Response]:
-        return self._get_all("users/0/collections", context="collections")
+        return self._get_all(self._library_path("collections"), context="collections")
 
-    def _get_top_items(self) -> list[dict[str, object]]:
-        items, _ = self._get_all(
-            "users/0/items/top",
+    def _get_top_items(
+        self,
+    ) -> tuple[list[dict[str, object]], httpx.Response]:
+        return self._get_all(
+            self._library_path("items/top"),
             context="top-level items",
         )
-        return items
 
     def _get_all(
         self,
@@ -479,6 +611,7 @@ class ManageZotero:
     ) -> tuple[list[dict[str, object]], httpx.Response]:
         records: list[dict[str, object]] = []
         first_response: httpx.Response | None = None
+        first_version: int | None = None
         start = 0
         while True:
             response = self._request(
@@ -488,13 +621,17 @@ class ManageZotero:
             )
             if first_response is None:
                 first_response = response
+                if self.backend == "web":
+                    first_version = _response_version(response)
+            elif self.backend == "web" and _response_version(response) != first_version:
+                raise PlanDriftError(
+                    f"The Zotero library changed while reading the {context} snapshot"
+                )
             payload = _response_json(response, context)
             if not isinstance(payload, list) or any(
                 not isinstance(entry, dict) for entry in payload
             ):
-                raise ZoteroManagementError(
-                    f"Zotero Local API returned malformed {context}"
-                )
+                raise ZoteroManagementError(f"Zotero API returned malformed {context}")
             page = payload
             records.extend(page)
 
@@ -518,9 +655,7 @@ class ManageZotero:
         add_collections: list[str] | None = None,
         remove_collections: list[str] | None = None,
     ) -> dict[str, object]:
-        keys = list(
-            dict.fromkeys(normalize_key(key, kind="item") for key in item_keys)
-        )
+        keys = list(dict.fromkeys(normalize_key(key, kind="item") for key in item_keys))
         if not keys:
             raise ValueError("At least one Zotero item key is required")
         if len(keys) > MAX_BATCH_ITEMS:
@@ -532,23 +667,22 @@ class ManageZotero:
         if set(added_tags) & set(removed_tags):
             raise ValueError("The same tag cannot be added and removed")
 
+        planning_context = self.planning_context()
+
         collection_additions = add_collections or []
         collection_removals = remove_collections or []
         collections: list[dict[str, object]] = []
         if collection_additions or collection_removals:
             collections, _ = self._get_collections()
         added_collection_keys = [
-            resolve_collection_key(collections, value)
-            for value in collection_additions
+            resolve_collection_key(collections, value) for value in collection_additions
         ]
         removed_collection_keys = [
-            resolve_collection_key(collections, value)
-            for value in collection_removals
+            resolve_collection_key(collections, value) for value in collection_removals
         ]
         if set(added_collection_keys) & set(removed_collection_keys):
             raise ValueError("The same collection cannot be added and removed")
 
-        planning_context = self.planning_context()
         changes: list[dict[str, object]] = []
         for key in keys:
             record = self._get_item(key)
@@ -558,13 +692,9 @@ class ManageZotero:
                     f"Zotero item {key} is not a top-level bibliographic item"
                 )
             before_tags = self._copy_tags(data.get("tags"))
-            before_collections = self._copy_collection_keys(
-                data.get("collections")
-            )
+            before_collections = self._copy_collection_keys(data.get("collections"))
             after_tags = [
-                tag
-                for tag in before_tags
-                if str(tag["tag"]) not in set(removed_tags)
+                tag for tag in before_tags if str(tag["tag"]) not in set(removed_tags)
             ]
             existing_tag_names = {str(tag["tag"]) for tag in after_tags}
             for tag in added_tags:
@@ -581,10 +711,7 @@ class ManageZotero:
                 if collection_key not in after_collections:
                     after_collections.append(collection_key)
 
-            if (
-                before_tags == after_tags
-                and before_collections == after_collections
-            ):
+            if before_tags == after_tags and before_collections == after_collections:
                 continue
             version = data.get("version", record.get("version"))
             if not isinstance(version, int):
@@ -636,11 +763,7 @@ class ManageZotero:
     def _copy_tags(value: object) -> list[dict[str, object]]:
         if not isinstance(value, list):
             return []
-        return [
-            dict(tag)
-            for tag in value
-            if isinstance(tag, dict) and tag.get("tag")
-        ]
+        return [dict(tag) for tag in value if isinstance(tag, dict) and tag.get("tag")]
 
     @staticmethod
     def _copy_collection_keys(value: object) -> list[str]:
@@ -659,14 +782,11 @@ class ManageZotero:
             raise ValueError("Collection name cannot be blank")
         planning_context = self.planning_context()
         collections, response = self._get_collections()
-        parent_key = (
-            resolve_collection_key(collections, parent) if parent else False
-        )
+        parent_key = resolve_collection_key(collections, parent) if parent else False
         for entry in collections:
             data = _collection_data(entry)
             if (
-                str(data.get("name") or "").casefold()
-                == normalized_name.casefold()
+                str(data.get("name") or "").casefold() == normalized_name.casefold()
                 and (data.get("parentCollection") or False) == parent_key
             ):
                 raise ValueError("A collection with that name already exists")
@@ -783,9 +903,7 @@ class ManageZotero:
             str(entry["key"]): entry for entry in collections if entry.get("key")
         }
         if collection_key not in records:
-            raise ValueError(
-                f"Zotero collection key was not found: {collection_key}"
-            )
+            raise ValueError(f"Zotero collection key was not found: {collection_key}")
         paths = build_collection_paths(collections)
         deleted_keys = {
             collection_key,
@@ -814,9 +932,7 @@ class ManageZotero:
             memberships = self._copy_collection_keys(data.get("collections"))
             if not set(memberships) & deleted_keys:
                 continue
-            remaining = [
-                key for key in memberships if key not in deleted_keys
-            ]
+            remaining = [key for key in memberships if key not in deleted_keys]
             key = str(record.get("key") or data.get("key") or "")
             version = data.get("version", record.get("version"))
             if not key or not isinstance(version, int):
@@ -835,9 +951,7 @@ class ManageZotero:
             )
         affected_items.sort(key=lambda entry: str(entry["key"]))
         target = next(
-            entry
-            for entry in collection_snapshot
-            if entry["key"] == collection_key
+            entry for entry in collection_snapshot if entry["key"] == collection_key
         )
         return {
             "target": {
@@ -851,8 +965,7 @@ class ManageZotero:
                 "deleted_collection_count": len(collection_snapshot),
                 "affected_item_count": len(affected_items),
                 "becomes_unfiled_count": sum(
-                    bool(entry["becomes_unfiled"])
-                    for entry in affected_items
+                    bool(entry["becomes_unfiled"]) for entry in affected_items
                 ),
                 "items_deleted": 0,
             },
@@ -864,8 +977,18 @@ class ManageZotero:
     ) -> dict[str, object]:
         key = normalize_key(collection_key, kind="collection")
         planning_context = self.planning_context()
-        collections, _ = self._get_collections()
-        state = self._delete_state(key, collections, self._get_top_items())
+        collections, collections_response = self._get_collections()
+        items, items_response = self._get_top_items()
+        state = self._delete_state(key, collections, items)
+        if self.backend == "web":
+            collections_version = _response_version(collections_response)
+            items_version = _response_version(items_response)
+            if collections_version != items_version:
+                raise PlanDriftError(
+                    "The Zotero library changed while preparing the delete impact "
+                    "snapshot"
+                )
+            state["expected_library_version"] = collections_version
         return sign_plan(
             {
                 "schema_version": PLAN_SCHEMA_VERSION,
@@ -958,6 +1081,78 @@ class ManageZotero:
         except CredentialStoreUnavailable as exc:
             raise AuthorizationError(str(exc)) from exc
 
+    def store_web_authorization(self, api_key: str) -> dict[str, object]:
+        if self.backend != "web":
+            raise AuthorizationError(
+                "Web API authorization requires the Web API backend"
+            )
+        if self._credential_store is None:
+            raise CredentialStoreUnavailable(
+                "A recognized operating-system credential store is required "
+                "for Zotero Web API keys"
+            )
+        candidate = api_key.strip()
+        if not candidate:
+            raise ValueError("Zotero Web API key cannot be blank")
+        identity = self._validate_web_key(candidate)
+        try:
+            self._credential_store.set(self.web_profile, candidate)
+        except CredentialStoreUnavailable as exc:
+            raise AuthorizationError(
+                "The Zotero Web API key could not be saved in a recognized "
+                "operating-system credential store"
+            ) from exc
+        self._web_api_key = candidate
+        self._web_identity = identity
+        return {
+            "web_profile": self.web_profile,
+            "user_id": identity["user_id"],
+            "username": identity["username"],
+            "personal_library_write_access": True,
+            "stored": True,
+        }
+
+    def web_authorization_status(self) -> dict[str, object]:
+        if self.backend != "web":
+            raise AuthorizationError(
+                "Web API authorization requires the Web API backend"
+            )
+        if self._credential_store is None:
+            return {
+                "web_profile": self.web_profile,
+                "secure_store_available": False,
+                "stored_authorization": False,
+            }
+        try:
+            stored = bool(self._credential_store.get(self.web_profile))
+        except CredentialStoreUnavailable:
+            return {
+                "web_profile": self.web_profile,
+                "secure_store_available": False,
+                "stored_authorization": False,
+            }
+        return {
+            "web_profile": self.web_profile,
+            "secure_store_available": True,
+            "stored_authorization": stored,
+        }
+
+    def forget_web_authorization(self) -> bool:
+        if self.backend != "web":
+            raise AuthorizationError(
+                "Web API authorization requires the Web API backend"
+            )
+        if self._credential_store is None:
+            return False
+        try:
+            removed = self._credential_store.delete(self.web_profile)
+        except CredentialStoreUnavailable as exc:
+            raise AuthorizationError(str(exc)) from exc
+        if removed:
+            self._web_api_key = None
+            self._web_identity = None
+        return removed
+
     def apply_plan(
         self,
         plan: dict[str, object],
@@ -968,14 +1163,69 @@ class ManageZotero:
         plan_id = plan.get("plan_id")
         if not isinstance(plan_id, str) or approval != plan_id:
             raise ValueError("The approval must exactly match the plan ID")
-        if (
-            plan.get("action") == "delete_collection"
-            and confirm_delete != plan.get("requires_delete_confirmation")
+        if plan.get("action") == "delete_collection" and confirm_delete != plan.get(
+            "requires_delete_confirmation"
         ):
             raise ValueError(
                 "The delete confirmation must exactly match the collection key"
             )
         validate_plan(plan)
+        plan_backend = str(plan.get("api_backend") or "local")
+        if plan_backend not in {"local", "web"}:
+            raise PlanIntegrityError("Zotero plan has an unsupported API backend")
+        if plan_backend != self.backend:
+            raise PlanDriftError("The plan belongs to a different Zotero API backend")
+        if plan_backend == "web":
+            if plan.get("application_mode") != "web_api":
+                raise PlanIntegrityError(
+                    "Zotero Web API plan has an invalid application mode"
+                )
+            if plan.get("web_profile") != self.web_profile:
+                raise PlanDriftError(
+                    "The plan belongs to a different Web API credential profile"
+                )
+            identity = self._ensure_web_identity()
+            expected_library = {
+                "type": "user",
+                "id": identity["user_id"],
+            }
+            if plan.get("library") != expected_library:
+                raise PlanDriftError(
+                    "The plan belongs to a different Zotero personal library"
+                )
+            current_server_id: str | None = None
+            self.authorization_mode = "web_api_key"
+        else:
+            current_server_id = self._validate_local_apply_context(plan)
+        action = str(plan["action"])
+        if action == "update_items":
+            result = self._apply_items(plan, current_server_id)
+        elif action == "create_collection":
+            result = self._apply_collection_create(plan, current_server_id)
+        elif action == "update_collection":
+            result = self._apply_collection_update(plan, current_server_id)
+        else:
+            result = self._apply_collection_delete(plan, current_server_id)
+        receipt = {
+            "schema_version": PLAN_SCHEMA_VERSION,
+            "plan_id": plan_id,
+            "action": action,
+            "applied_at": _now(),
+            "authorization_mode": self.authorization_mode,
+            **result,
+        }
+        if plan_backend == "web":
+            receipt.update(
+                {
+                    "api_backend": "web",
+                    "application_mode": "web_api",
+                    "library": plan["library"],
+                    "web_profile": self.web_profile,
+                }
+            )
+        return receipt
+
+    def _validate_local_apply_context(self, plan: dict[str, object]) -> str:
         if (
             plan.get("application_mode") == "manual_zotero_desktop"
             or plan.get("local_api_write_supported") is False
@@ -991,23 +1241,7 @@ class ManageZotero:
             raise PlanDriftError(
                 "The plan belongs to a different Zotero database instance"
             )
-        action = str(plan["action"])
-        if action == "update_items":
-            result = self._apply_items(plan, current_server_id)
-        elif action == "create_collection":
-            result = self._apply_collection_create(plan, current_server_id)
-        elif action == "update_collection":
-            result = self._apply_collection_update(plan, current_server_id)
-        else:
-            result = self._apply_collection_delete(plan, current_server_id)
-        return {
-            "schema_version": PLAN_SCHEMA_VERSION,
-            "plan_id": plan_id,
-            "action": action,
-            "applied_at": _now(),
-            "authorization_mode": self.authorization_mode,
-            **result,
-        }
+        return current_server_id
 
     @staticmethod
     def _before_matches(
@@ -1020,24 +1254,21 @@ class ManageZotero:
             raise PlanIntegrityError("Item plan has malformed before state")
         return (
             data.get("version", record.get("version")) == change.get("version")
-            and ManageZotero._copy_tags(data.get("tags"))
-            == before.get("tags")
+            and ManageZotero._copy_tags(data.get("tags")) == before.get("tags")
             and ManageZotero._copy_collection_keys(data.get("collections"))
             == before.get("collections")
         )
 
     def _write_headers(
         self,
-        server_id: str,
+        server_id: str | None,
         api_key: str,
         *,
         version: int | None = None,
     ) -> dict[str, str]:
-        headers = {
-            **API_HEADERS,
-            "Zotero-Server-ID": server_id,
-            "Zotero-API-Key": api_key,
-        }
+        headers = {**API_HEADERS, "Zotero-API-Key": api_key}
+        if server_id is not None:
+            headers["Zotero-Server-ID"] = server_id
         if version is not None:
             headers["If-Unmodified-Since-Version"] = str(version)
         return headers
@@ -1047,7 +1278,8 @@ class ManageZotero:
         method: str,
         path: str,
         *,
-        server_id: str,
+        server_id: str | None,
+        params: dict[str, object] | None = None,
         json_body: object | None = None,
         headers: dict[str, str],
     ) -> httpx.Response:
@@ -1055,13 +1287,26 @@ class ManageZotero:
             return self._request(
                 method,
                 path,
+                params=params,
                 json_body=json_body,
                 headers=headers,
             )
         except httpx.HTTPStatusError as exc:
-            if (
-                exc.response.status_code == 401
-                and self.authorization_mode.startswith("remembered_")
+            if self.backend == "web" and exc.response.status_code in {401, 403}:
+                self.authorization_mode = "web_api_key_rejected"
+                raise AuthorizationError(
+                    "The stored Zotero Web API key was rejected. The credential "
+                    "was preserved and the write was not retried. Run "
+                    "web-auth-status to inspect the selected profile or use the "
+                    "explicit web-auth-forget flow to remove it."
+                ) from exc
+            if exc.response.status_code == 412:
+                raise PlanDriftError(
+                    "The Zotero library changed after the plan was prepared; "
+                    "the versioned write was rejected"
+                ) from exc
+            if exc.response.status_code == 401 and self.authorization_mode.startswith(
+                "remembered_"
             ):
                 try:
                     self.forget_remembered_authorization(server_id)
@@ -1079,16 +1324,26 @@ class ManageZotero:
                 ) from exc
             raise
 
+    def _api_key_for_write(self, server_id: str | None) -> str:
+        if self.backend == "web":
+            self._ensure_web_identity()
+            self.authorization_mode = "web_api_key"
+            return self._stored_web_key()
+        if server_id is None:
+            raise PlanIntegrityError("Local API write has no Zotero server ID")
+        return self.authorize_write(server_id)
+
     def _apply_items(
         self,
         plan: dict[str, object],
-        server_id: str,
+        server_id: str | None,
     ) -> dict[str, object]:
         changes = plan.get("changes")
         if not isinstance(changes, list) or not changes:
             raise PlanIntegrityError("Item plan contains no changes")
-        self._assert_items_unchanged(changes)
-        api_key = self.authorize_write(server_id)
+        if self.backend == "local":
+            self._assert_items_unchanged(changes)
+        api_key = self._api_key_for_write(server_id)
         self._assert_items_unchanged(changes)
 
         payload = []
@@ -1106,7 +1361,7 @@ class ManageZotero:
             )
         response = self._write_request(
             "POST",
-            "users/0/items",
+            self._library_path("items"),
             server_id=server_id,
             json_body=payload,
             headers=self._write_headers(server_id, api_key),
@@ -1161,7 +1416,7 @@ class ManageZotero:
     def _apply_collection_create(
         self,
         plan: dict[str, object],
-        server_id: str,
+        server_id: str | None,
     ) -> dict[str, object]:
         collections, response = self._get_collections()
         expected_version = plan.get("expected_library_version")
@@ -1177,10 +1432,10 @@ class ManageZotero:
             str(entry.get("key") or "") for entry in collections
         }:
             raise PlanDriftError("The planned parent collection no longer exists")
-        api_key = self.authorize_write(server_id)
+        api_key = self._api_key_for_write(server_id)
         write_response = self._write_request(
             "POST",
-            "users/0/collections",
+            self._library_path("collections"),
             server_id=server_id,
             json_body=[after],
             headers=self._write_headers(
@@ -1193,11 +1448,9 @@ class ManageZotero:
         created_key = self._created_object_key(payload)
         created = self._get_collection(created_key)
         data = _collection_data(created)
-        verified = (
-            data.get("name") == after.get("name")
-            and (data.get("parentCollection") or False)
-            == (after.get("parentCollection") or False)
-        )
+        verified = data.get("name") == after.get("name") and (
+            data.get("parentCollection") or False
+        ) == (after.get("parentCollection") or False)
         return {
             "verified": verified,
             "created_collection_key": created_key,
@@ -1222,7 +1475,7 @@ class ManageZotero:
         raise ZoteroManagementError("Malformed Zotero collection creation result")
 
     def _get_collection(self, key: str) -> dict[str, object]:
-        payload = self._get_json(f"users/0/collections/{key}")
+        payload = self._get_json(self._library_path(f"collections/{key}"))
         if not isinstance(payload, dict):
             raise ZoteroManagementError(f"Zotero collection {key} is malformed")
         return payload
@@ -1230,7 +1483,7 @@ class ManageZotero:
     def _apply_collection_update(
         self,
         plan: dict[str, object],
-        server_id: str,
+        server_id: str | None,
     ) -> dict[str, object]:
         before = plan.get("before")
         after = plan.get("after")
@@ -1253,20 +1506,18 @@ class ManageZotero:
             raise PlanDriftError(
                 f"Collection {key} changed after the plan was prepared"
             )
-        api_key = self.authorize_write(server_id)
+        api_key = self._api_key_for_write(server_id)
         self._write_request(
             "PUT",
-            f"users/0/collections/{key}",
+            self._library_path(f"collections/{key}"),
             server_id=server_id,
             json_body=after,
             headers=self._write_headers(server_id, api_key),
         )
         updated = _collection_data(self._get_collection(key))
-        verified = (
-            updated.get("name") == after.get("name")
-            and (updated.get("parentCollection") or False)
-            == (after.get("parentCollection") or False)
-        )
+        verified = updated.get("name") == after.get("name") and (
+            updated.get("parentCollection") or False
+        ) == (after.get("parentCollection") or False)
         return {
             "verified": verified,
             "inverse": {
@@ -1279,35 +1530,57 @@ class ManageZotero:
     def _apply_collection_delete(
         self,
         plan: dict[str, object],
-        server_id: str,
+        server_id: str | None,
     ) -> dict[str, object]:
         target = plan.get("target")
         if not isinstance(target, dict):
             raise PlanIntegrityError("Collection delete plan has no target")
         key = normalize_key(str(target.get("key") or ""), kind="collection")
         self._assert_delete_state_unchanged(plan, key)
-        api_key = self.authorize_write(server_id)
-        # The authorization dialog can remain open while the user edits Zotero.
-        # Recheck the full cascade immediately before using the granted key.
-        self._assert_delete_state_unchanged(plan, key)
+        api_key = self._api_key_for_write(server_id)
+        if self.backend == "local":
+            # The authorization dialog can remain open while the user edits
+            # Zotero. Recheck immediately before using the granted key.
+            self._assert_delete_state_unchanged(plan, key)
+        if self.backend == "web":
+            expected_version = plan.get("expected_library_version")
+            if (
+                not isinstance(expected_version, int)
+                or isinstance(expected_version, bool)
+                or expected_version < 0
+            ):
+                raise PlanIntegrityError(
+                    "Web collection delete plan has no library version"
+                )
+            delete_path = self._library_path("collections")
+            delete_params: dict[str, object] | None = {"collectionKey": key}
+            delete_version = expected_version
+        else:
+            delete_path = self._library_path(f"collections/{key}")
+            delete_params = None
+            delete_version = int(target["version"])
         self._write_request(
             "DELETE",
-            f"users/0/collections/{key}",
+            delete_path,
             server_id=server_id,
+            params=delete_params,
             headers=self._write_headers(
                 server_id,
                 api_key,
-                version=int(target["version"]),
+                version=delete_version,
             ),
         )
 
-        deleted_keys = {
-            str(entry["key"]) for entry in plan["collection_snapshot"]
-        }
+        deleted_keys = {str(entry["key"]) for entry in plan["collection_snapshot"]}
         missing_collections = []
         for deleted_key in sorted(deleted_keys):
             response = self._client.get(
-                self._url(f"users/0/collections/{deleted_key}")
+                self._url(self._library_path(f"collections/{deleted_key}")),
+                headers=(
+                    {"Zotero-API-Key": self._stored_web_key()}
+                    if self.backend == "web"
+                    else None
+                ),
             )
             if response.status_code != 404:
                 missing_collections.append(deleted_key)
@@ -1347,8 +1620,24 @@ class ManageZotero:
         plan: dict[str, object],
         key: str,
     ) -> None:
-        collections, _ = self._get_collections()
-        items = self._get_top_items()
+        collections, collections_response = self._get_collections()
+        items, items_response = self._get_top_items()
+        if self.backend == "web":
+            expected_version = plan.get("expected_library_version")
+            if not isinstance(expected_version, int) or isinstance(
+                expected_version, bool
+            ):
+                raise PlanIntegrityError(
+                    "Web collection delete plan has no library version"
+                )
+            if (
+                _response_version(collections_response) != expected_version
+                or _response_version(items_response) != expected_version
+            ):
+                raise PlanDriftError(
+                    "The Zotero library changed after the delete impact snapshot "
+                    "was prepared"
+                )
         current_state = self._delete_state(key, collections, items)
         for field in (
             "target",
@@ -1365,9 +1654,22 @@ class ManageZotero:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = JsonArgumentParser(
-        description="Plan and apply approved Zotero Local API organization changes"
+        description="Plan and apply approved Zotero API organization changes"
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    def add_backend_options(command_parser: argparse.ArgumentParser) -> None:
+        command_parser.add_argument(
+            "--backend",
+            choices=("local", "web"),
+            default="local",
+            help="Use the Local API by default or opt in to the official Web API",
+        )
+        command_parser.add_argument(
+            "--web-profile",
+            default="default",
+            help="OS credential-store profile for an opted-in Web API key",
+        )
 
     items_parser = subparsers.add_parser(
         "plan-items",
@@ -1379,6 +1681,7 @@ def build_parser() -> argparse.ArgumentParser:
     items_parser.add_argument("--add-collection", action="append", default=[])
     items_parser.add_argument("--remove-collection", action="append", default=[])
     items_parser.add_argument("--output", type=Path, required=True)
+    add_backend_options(items_parser)
 
     create_parser = subparsers.add_parser(
         "plan-collection-create",
@@ -1387,6 +1690,7 @@ def build_parser() -> argparse.ArgumentParser:
     create_parser.add_argument("name")
     create_parser.add_argument("--parent")
     create_parser.add_argument("--output", type=Path, required=True)
+    add_backend_options(create_parser)
 
     update_parser = subparsers.add_parser(
         "plan-collection-update",
@@ -1398,6 +1702,7 @@ def build_parser() -> argparse.ArgumentParser:
     parent_group.add_argument("--parent")
     parent_group.add_argument("--root", action="store_true")
     update_parser.add_argument("--output", type=Path, required=True)
+    add_backend_options(update_parser)
 
     delete_parser = subparsers.add_parser(
         "plan-collection-delete",
@@ -1405,6 +1710,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     delete_parser.add_argument("collection_key")
     delete_parser.add_argument("--output", type=Path, required=True)
+    add_backend_options(delete_parser)
 
     apply_parser = subparsers.add_parser(
         "apply",
@@ -1414,6 +1720,7 @@ def build_parser() -> argparse.ArgumentParser:
     apply_parser.add_argument("--approve", required=True)
     apply_parser.add_argument("--confirm-delete")
     apply_parser.add_argument("--receipt", type=Path, required=True)
+    add_backend_options(apply_parser)
 
     subparsers.add_parser(
         "auth-status",
@@ -1423,6 +1730,21 @@ def build_parser() -> argparse.ArgumentParser:
         "auth-forget",
         help="Forget this tool's stored key for the current Zotero database",
     )
+    web_store_parser = subparsers.add_parser(
+        "web-auth-store",
+        help="Validate and securely store a personal-library Web API key",
+    )
+    web_store_parser.add_argument("--web-profile", default="default")
+    web_status_parser = subparsers.add_parser(
+        "web-auth-status",
+        help="Report whether a Web API key is stored for a credential profile",
+    )
+    web_status_parser.add_argument("--web-profile", default="default")
+    web_forget_parser = subparsers.add_parser(
+        "web-auth-forget",
+        help="Remove a Web API key from one credential profile",
+    )
+    web_forget_parser.add_argument("--web-profile", default="default")
     return parser
 
 
@@ -1435,7 +1757,14 @@ def _load_json_object(path: Path) -> dict[str, object]:
 
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
+    backend = (
+        "web"
+        if args.command.startswith("web-auth-")
+        else getattr(args, "backend", "local")
+    )
+    web_profile = getattr(args, "web_profile", "default")
     try:
+        web_api_key = prompt_web_api_key() if args.command == "web-auth-store" else None
         if args.command == "apply":
             output: Path | None = args.receipt
         elif args.command.startswith("plan-"):
@@ -1444,7 +1773,10 @@ def main(argv: list[str] | None = None) -> int:
             output = None
         if output is not None:
             ensure_output_available(output)
-        with ManageZotero() as client:
+        with ManageZotero(
+            backend=backend,
+            web_profile=web_profile,
+        ) as client:
             if args.command == "plan-items":
                 result = client.plan_items(
                     args.item_keys,
@@ -1477,7 +1809,7 @@ def main(argv: list[str] | None = None) -> int:
             elif args.command == "auth-status":
                 server_id = client.server_id()
                 result = client.remembered_authorization_status(server_id)
-            else:
+            elif args.command == "auth-forget":
                 server_id = client.server_id()
                 removed = client.forget_remembered_authorization(server_id)
                 result = {
@@ -1485,27 +1817,39 @@ def main(argv: list[str] | None = None) -> int:
                     "local_credential_removed": removed,
                     "zotero_revocation_required": True,
                 }
+            elif args.command == "web-auth-store":
+                if web_api_key is None:  # pragma: no cover - command fixes type
+                    raise AuthorizationError("No Zotero Web API key was provided")
+                result = client.store_web_authorization(web_api_key)
+            elif args.command == "web-auth-status":
+                result = client.web_authorization_status()
+            else:
+                result = {
+                    "web_profile": client.web_profile,
+                    "stored_credential_removed": (client.forget_web_authorization()),
+                    "zotero_key_revocation_required": True,
+                }
         if output is not None:
             write_json_exclusive(output, result)
     except (httpx.ConnectError, httpx.ConnectTimeout):
         print_json(
             {
                 "error": (
-                    "Cannot connect to Zotero Local API. Start Zotero Desktop "
-                    "and enable local application access."
+                    "Cannot connect to the selected Zotero API backend. For "
+                    "Local API access, start Zotero Desktop and enable local "
+                    "application access."
                 )
             }
         )
         return 1
     except httpx.TimeoutException:
-        print_json({"error": "Zotero Local API request timed out"})
+        print_json({"error": "Zotero API request timed out"})
         return 1
     except httpx.HTTPStatusError as exc:
         print_json(
             {
                 "error": (
-                    "Zotero Local API request failed with HTTP "
-                    f"{exc.response.status_code}"
+                    f"Zotero API request failed with HTTP {exc.response.status_code}"
                 )
             }
         )

@@ -131,18 +131,25 @@ This fallback improves text extraction but does not provide OCR.
 
 ### `manage-zotero-library`
 
-Safely organizes a researcher's personal Zotero library through the official
-Local API. It prepares reviewable plans for tag and collection-membership
-changes and for creating, renaming, moving, or deleting collections. Writes
-require runtime confirmation that the installed Zotero exposes the new local
-write protocol, exact plan approval, current-version checks, and post-write
-receipts. On older GET-only Zotero versions, planning still works, but the user
-applies the approved plan in Zotero Desktop and the skill verifies it with
-read-only requests.
+Safely organizes a researcher's personal Zotero library. The official Local API
+remains the default; an explicitly selected official Zotero Web API backend is
+available for the same tag, collection-membership, and collection operations.
+Both backends prepare reviewable plans and require exact plan approval,
+current-version checks, and post-write receipts. On older GET-only Local API
+versions, planning still works, but the user applies the approved plan in
+Zotero Desktop and the skill verifies it with read-only requests.
 The user can choose one-time authorization or store `Always Allow` securely in
 macOS Keychain, Windows Credential Locker, or a supported Linux secret store.
+Web API keys are validated through `/keys/current` for personal-library write
+scope and are accepted only through a hidden prompt into one of those
+recognized OS credential stores; if echo-free entry is unavailable, the
+command stops before reading a key. Web plans are bound to the returned user ID
+and a named credential profile; rejected writes preserve that credential for
+explicit status or forget actions. Keys never enter arguments, environment
+variables, plans, receipts, logs, chat, or repository files.
 Collection deletion additionally requires the target key and never deletes
-library items or attachments.
+library items or attachments. Web collection deletion binds the reviewed
+cascade to one library version and uses an atomic library-version guard.
 
 Installing this skill also installs the `zotero-read` provider used to discover
 exact targets.

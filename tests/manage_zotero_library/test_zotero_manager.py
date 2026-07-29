@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import warnings
 from pathlib import Path
 
 import httpx
@@ -9,13 +10,7 @@ import pytest
 from tests.conftest import load_script
 
 ROOT = Path(__file__).resolve().parents[2]
-SCRIPT = (
-    ROOT
-    / "skills"
-    / "manage-zotero-library"
-    / "scripts"
-    / "zotero_manager.py"
-)
+SCRIPT = ROOT / "skills" / "manage-zotero-library" / "scripts" / "zotero_manager.py"
 SKILL = ROOT / "skills" / "manage-zotero-library"
 QUERY_SKILL = ROOT / "skills" / "query-zotero-library"
 
@@ -57,6 +52,25 @@ def get_only_root_response() -> httpx.Response:
         headers={
             "Zotero-API-Version": "3",
             "X-Zotero-Version": "9.0.6",
+        },
+    )
+
+
+def web_key_response(*, write: bool = True, user_id: int = 12345) -> httpx.Response:
+    return httpx.Response(
+        200,
+        json={
+            "userID": user_id,
+            "username": "Researcher",
+            "access": {
+                "user": {
+                    "library": True,
+                    "files": False,
+                    "notes": True,
+                    "write": write,
+                },
+                "groups": {},
+            },
         },
     )
 
@@ -109,6 +123,77 @@ def test_client_rejects_non_loopback_write_target(manager_module):
         )
 
 
+def test_web_client_rejects_nonofficial_api_target(manager_module):
+    with pytest.raises(ValueError, match="api.zotero.org"):
+        manager_module.ManageZotero(
+            backend="web",
+            base_url="https://example.com/",
+            credential_store=FakeCredentialStore(),
+        )
+
+
+def test_web_plan_uses_stored_key_and_binds_personal_library(manager_module):
+    requests: list[httpx.Request] = []
+    store = FakeCredentialStore({"research": "WEB-SECRET"})
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        assert request.headers["Zotero-API-Key"] == "WEB-SECRET"
+        if request.url.path == "/keys/current":
+            return web_key_response()
+        if request.url.path == "/users/12345/items/ITEM2345":
+            return httpx.Response(
+                200,
+                json=item(
+                    "ITEM2345",
+                    version=12,
+                    title="Web API paper",
+                    tags=[{"tag": "unread"}],
+                ),
+            )
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    with manager_module.ManageZotero(
+        backend="web",
+        web_profile="research",
+        transport=httpx.MockTransport(handler),
+        credential_store=store,
+    ) as client:
+        plan = client.plan_items(
+            ["ITEM2345"],
+            add_tags=["reviewed"],
+            remove_tags=["unread"],
+        )
+
+    assert plan["api_backend"] == "web"
+    assert plan["application_mode"] == "web_api"
+    assert plan["library"] == {"type": "user", "id": 12345}
+    assert plan["web_profile"] == "research"
+    assert "WEB-SECRET" not in json.dumps(plan)
+    assert {request.method for request in requests} == {"GET"}
+
+
+def test_web_plan_rejects_key_without_personal_write_access(manager_module):
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        assert request.url.path == "/keys/current"
+        return web_key_response(write=False)
+
+    with (
+        manager_module.ManageZotero(
+            backend="web",
+            transport=httpx.MockTransport(handler),
+            credential_store=FakeCredentialStore({"default": "READ-ONLY"}),
+        ) as client,
+        pytest.raises(manager_module.AuthorizationError, match="write access"),
+    ):
+        client.plan_items(["ITEM2345"], add_tags=["reviewed"])
+
+    assert [request.url.path for request in requests] == ["/keys/current"]
+
+
 def test_plan_items_merges_tags_and_collection_membership_without_writes(
     manager_module,
 ):
@@ -151,9 +236,7 @@ def test_plan_items_merges_tags_and_collection_membership_without_writes(
             )
         raise AssertionError(f"Unexpected request: {request.method} {request.url}")
 
-    with manager_module.ManageZotero(
-        transport=httpx.MockTransport(handler)
-    ) as client:
+    with manager_module.ManageZotero(transport=httpx.MockTransport(handler)) as client:
         plan = client.plan_items(
             ["ITEM2345"],
             add_tags=["reviewed"],
@@ -205,9 +288,7 @@ def test_get_only_zotero_still_creates_manual_collection_plan(manager_module):
             )
         raise AssertionError(f"Unexpected request: {request.method} {request.url}")
 
-    with manager_module.ManageZotero(
-        transport=httpx.MockTransport(handler)
-    ) as client:
+    with manager_module.ManageZotero(transport=httpx.MockTransport(handler)) as client:
         plan = client.plan_collection_update(
             "PARENT23",
             name="Renamed Project",
@@ -250,9 +331,7 @@ def test_manual_plan_cannot_apply_or_request_authorization(manager_module):
     plan = manager_module.sign_plan(unsigned)
 
     with (
-        manager_module.ManageZotero(
-            transport=httpx.MockTransport(handler)
-        ) as client,
+        manager_module.ManageZotero(transport=httpx.MockTransport(handler)) as client,
         pytest.raises(manager_module.ZoteroManagementError, match="GET-only"),
     ):
         client.apply_plan(plan, approval=plan["plan_id"])
@@ -289,9 +368,7 @@ def test_manual_application_mode_blocks_apply_even_with_server_id(manager_module
     plan = manager_module.sign_plan(unsigned)
 
     with (
-        manager_module.ManageZotero(
-            transport=httpx.MockTransport(handler)
-        ) as client,
+        manager_module.ManageZotero(transport=httpx.MockTransport(handler)) as client,
         pytest.raises(manager_module.ZoteroManagementError, match="GET-only"),
     ):
         client.apply_plan(plan, approval=plan["plan_id"])
@@ -394,9 +471,7 @@ def test_delete_plan_discloses_descendants_members_and_unfiled_items(
             )
         raise AssertionError(f"Unexpected request: {request.url}")
 
-    with manager_module.ManageZotero(
-        transport=httpx.MockTransport(handler)
-    ) as client:
+    with manager_module.ManageZotero(transport=httpx.MockTransport(handler)) as client:
         plan = client.plan_collection_delete("PARENT23")
 
     assert plan["action"] == "delete_collection"
@@ -467,9 +542,7 @@ def test_delete_plan_paginates_before_reporting_affected_items(manager_module):
                 )
         raise AssertionError(f"Unexpected request: {request.url}")
 
-    with manager_module.ManageZotero(
-        transport=httpx.MockTransport(handler)
-    ) as client:
+    with manager_module.ManageZotero(transport=httpx.MockTransport(handler)) as client:
         plan = client.plan_collection_delete("PARENT23")
 
     assert len(item_requests) == 2
@@ -492,9 +565,7 @@ def test_apply_rejects_wrong_approval_before_authorization(manager_module):
         "changes": [],
     }
     with (
-        manager_module.ManageZotero(
-            transport=httpx.MockTransport(handler)
-        ) as client,
+        manager_module.ManageZotero(transport=httpx.MockTransport(handler)) as client,
         pytest.raises(ValueError, match="approval"),
     ):
         client.apply_plan(plan, approval="WRONG")
@@ -516,9 +587,7 @@ def test_apply_rejects_delete_without_exact_collection_confirmation(
     with (
         manager_module.ManageZotero(
             transport=httpx.MockTransport(
-                lambda request: pytest.fail(
-                    f"Unexpected request: {request.url}"
-                )
+                lambda request: pytest.fail(f"Unexpected request: {request.url}")
             )
         ) as client,
         pytest.raises(ValueError, match="delete confirmation"),
@@ -593,9 +662,7 @@ def test_apply_item_plan_uses_one_time_auth_versions_and_verifies(
             )
         raise AssertionError(f"Unexpected request: {request.method} {request.url}")
 
-    with manager_module.ManageZotero(
-        transport=httpx.MockTransport(handler)
-    ) as client:
+    with manager_module.ManageZotero(transport=httpx.MockTransport(handler)) as client:
         unsigned = {
             "schema_version": 1,
             "action": "update_items",
@@ -632,6 +699,293 @@ def test_apply_item_plan_uses_one_time_auth_versions_and_verifies(
         "POST",
         "GET",
     ]
+
+
+def test_apply_web_item_plan_uses_bound_account_and_no_local_auth(
+    manager_module,
+):
+    requests: list[httpx.Request] = []
+    before = item(
+        "ITEM2345",
+        version=12,
+        title="Paper",
+        tags=[{"tag": "unread"}],
+    )
+    after = item(
+        "ITEM2345",
+        version=13,
+        title="Paper",
+        tags=[{"tag": "reviewed"}],
+    )
+    item_reads = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal item_reads
+        requests.append(request)
+        assert request.headers["Zotero-API-Key"] == "WEB-SECRET"
+        if request.url.path == "/keys/current":
+            return web_key_response()
+        if request.url.path == "/users/12345/items/ITEM2345":
+            item_reads += 1
+            return httpx.Response(200, json=before if item_reads == 1 else after)
+        if request.url.path == "/users/12345/items":
+            assert request.method == "POST"
+            assert "Zotero-Server-ID" not in request.headers
+            assert json.loads(request.content) == [
+                {
+                    "key": "ITEM2345",
+                    "version": 12,
+                    "tags": [{"tag": "reviewed"}],
+                    "collections": [],
+                }
+            ]
+            return httpx.Response(
+                200,
+                json={
+                    "successful": {"0": after},
+                    "unchanged": {},
+                    "failed": {},
+                },
+            )
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    unsigned = {
+        "schema_version": 1,
+        "action": "update_items",
+        "api_backend": "web",
+        "application_mode": "web_api",
+        "library": {"type": "user", "id": 12345},
+        "web_profile": "research",
+        "changes": [
+            {
+                "key": "ITEM2345",
+                "title": "Paper",
+                "version": 12,
+                "before": {
+                    "tags": [{"tag": "unread"}],
+                    "collections": [],
+                },
+                "after": {
+                    "tags": [{"tag": "reviewed"}],
+                    "collections": [],
+                },
+            }
+        ],
+    }
+    plan = manager_module.sign_plan(unsigned)
+    with manager_module.ManageZotero(
+        backend="web",
+        web_profile="research",
+        transport=httpx.MockTransport(handler),
+        credential_store=FakeCredentialStore({"research": "WEB-SECRET"}),
+    ) as client:
+        receipt = client.apply_plan(plan, approval=plan["plan_id"])
+
+    assert receipt["verified"] is True
+    assert receipt["authorization_mode"] == "web_api_key"
+    assert receipt["api_backend"] == "web"
+    assert receipt["library"] == {"type": "user", "id": 12345}
+    assert "WEB-SECRET" not in json.dumps(receipt)
+    assert not any(
+        request.url.path.endswith("/local/authorize") for request in requests
+    )
+
+
+def test_apply_web_collection_create_uses_library_version(manager_module):
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        assert request.headers["Zotero-API-Key"] == "WEB-SECRET"
+        if request.url.path == "/keys/current":
+            return web_key_response()
+        if request.method == "GET" and request.url.path == "/users/12345/collections":
+            return httpx.Response(
+                200,
+                json=[],
+                headers={"Last-Modified-Version": "20", "Total-Results": "0"},
+            )
+        if request.method == "POST" and request.url.path == "/users/12345/collections":
+            assert request.headers["If-Unmodified-Since-Version"] == "20"
+            assert "Zotero-Server-ID" not in request.headers
+            assert json.loads(request.content) == [
+                {"name": "New Project", "parentCollection": False}
+            ]
+            return httpx.Response(
+                200,
+                json={"successful": {"0": {"key": "NEWC2LL2"}}},
+            )
+        if request.url.path == "/users/12345/collections/NEWC2LL2":
+            return httpx.Response(
+                200,
+                json=collection("NEWC2LL2", version=21, name="New Project"),
+            )
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    with manager_module.ManageZotero(
+        backend="web",
+        web_profile="research",
+        transport=httpx.MockTransport(handler),
+        credential_store=FakeCredentialStore({"research": "WEB-SECRET"}),
+    ) as client:
+        plan = client.plan_collection_create("New Project")
+        receipt = client.apply_plan(plan, approval=plan["plan_id"])
+
+    assert receipt["verified"] is True
+    assert receipt["created_collection_key"] == "NEWC2LL2"
+    assert receipt["library"] == {"type": "user", "id": 12345}
+
+
+def test_apply_web_collection_delete_uses_atomic_library_version_guard(
+    manager_module,
+):
+    requests: list[httpx.Request] = []
+    list_reads = {"collections": 0, "items": 0}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        assert request.headers["Zotero-API-Key"] == "WEB-SECRET"
+        if request.url.path == "/keys/current":
+            return web_key_response()
+        if request.method == "GET" and request.url.path in {
+            "/users/12345/collections",
+            "/users/12345/items/top",
+        }:
+            kind = (
+                "collections" if request.url.path.endswith("collections") else "items"
+            )
+            list_reads[kind] += 1
+            payload = (
+                [collection("PARENT23", version=10, name="Old Project")]
+                if kind == "collections"
+                else []
+            )
+            return httpx.Response(
+                200,
+                json=payload,
+                headers={
+                    "Last-Modified-Version": "20",
+                    "Total-Results": str(len(payload)),
+                },
+            )
+        if request.method == "DELETE":
+            assert request.url.path == "/users/12345/collections"
+            assert request.url.params["collectionKey"] == "PARENT23"
+            assert request.headers["If-Unmodified-Since-Version"] == "20"
+            # Simulate a child collection or membership added after the final
+            # read. The library-wide guard must make Zotero reject the delete.
+            return httpx.Response(412)
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    with manager_module.ManageZotero(
+        backend="web",
+        web_profile="research",
+        transport=httpx.MockTransport(handler),
+        credential_store=FakeCredentialStore({"research": "WEB-SECRET"}),
+    ) as client:
+        plan = client.plan_collection_delete("PARENT23")
+        assert plan["expected_library_version"] == 20
+        with pytest.raises(manager_module.PlanDriftError, match="library changed"):
+            client.apply_plan(
+                plan,
+                approval=plan["plan_id"],
+                confirm_delete="PARENT23",
+            )
+
+    assert list_reads == {"collections": 2, "items": 2}
+    assert sum(request.method == "DELETE" for request in requests) == 1
+
+
+def test_web_delete_plan_rejects_inconsistent_impact_snapshot(manager_module):
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/keys/current":
+            return web_key_response()
+        if request.url.path == "/users/12345/collections":
+            return httpx.Response(
+                200,
+                json=[collection("PARENT23", version=10, name="Old Project")],
+                headers={"Last-Modified-Version": "20", "Total-Results": "1"},
+            )
+        if request.url.path == "/users/12345/items/top":
+            return httpx.Response(
+                200,
+                json=[],
+                headers={"Last-Modified-Version": "21", "Total-Results": "0"},
+            )
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    with (
+        manager_module.ManageZotero(
+            backend="web",
+            web_profile="research",
+            transport=httpx.MockTransport(handler),
+            credential_store=FakeCredentialStore({"research": "WEB-SECRET"}),
+        ) as client,
+        pytest.raises(manager_module.PlanDriftError, match="snapshot"),
+    ):
+        client.plan_collection_delete("PARENT23")
+
+    assert not any(request.method == "DELETE" for request in requests)
+
+
+def test_apply_web_plan_rejects_different_credential_profile(manager_module):
+    unsigned = {
+        "schema_version": 1,
+        "action": "update_items",
+        "api_backend": "web",
+        "application_mode": "web_api",
+        "library": {"type": "user", "id": 12345},
+        "web_profile": "research",
+        "changes": [],
+    }
+    plan = manager_module.sign_plan(unsigned)
+    with (
+        manager_module.ManageZotero(
+            backend="web",
+            web_profile="other",
+            transport=httpx.MockTransport(
+                lambda request: pytest.fail(f"Unexpected request: {request.url}")
+            ),
+            credential_store=FakeCredentialStore({"other": "OTHER-SECRET"}),
+        ) as client,
+        pytest.raises(manager_module.PlanDriftError, match="credential profile"),
+    ):
+        client.apply_plan(plan, approval=plan["plan_id"])
+
+
+def test_apply_web_plan_rejects_different_personal_library(manager_module):
+    requests: list[httpx.Request] = []
+    unsigned = {
+        "schema_version": 1,
+        "action": "update_items",
+        "api_backend": "web",
+        "application_mode": "web_api",
+        "library": {"type": "user", "id": 12345},
+        "web_profile": "research",
+        "changes": [],
+    }
+    plan = manager_module.sign_plan(unsigned)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        assert request.url.path == "/keys/current"
+        return web_key_response(user_id=98765)
+
+    with (
+        manager_module.ManageZotero(
+            backend="web",
+            web_profile="research",
+            transport=httpx.MockTransport(handler),
+            credential_store=FakeCredentialStore({"research": "WEB-SECRET"}),
+        ) as client,
+        pytest.raises(manager_module.PlanDriftError, match="personal library"),
+    ):
+        client.apply_plan(plan, approval=plan["plan_id"])
+
+    assert [request.url.path for request in requests] == ["/keys/current"]
 
 
 def test_apply_collection_create_uses_library_version_and_verifies(
@@ -686,9 +1040,7 @@ def test_apply_collection_create_uses_library_version_and_verifies(
             )
         raise AssertionError(f"Unexpected request: {request.method} {request.url}")
 
-    with manager_module.ManageZotero(
-        transport=httpx.MockTransport(handler)
-    ) as client:
+    with manager_module.ManageZotero(transport=httpx.MockTransport(handler)) as client:
         plan = client.plan_collection_create("New Project")
         receipt = client.apply_plan(plan, approval=plan["plan_id"])
 
@@ -752,9 +1104,7 @@ def test_apply_collection_update_preserves_version_and_verifies(
         },
     }
     plan = manager_module.sign_plan(unsigned)
-    with manager_module.ManageZotero(
-        transport=httpx.MockTransport(handler)
-    ) as client:
+    with manager_module.ManageZotero(transport=httpx.MockTransport(handler)) as client:
         receipt = client.apply_plan(plan, approval=plan["plan_id"])
 
     assert receipt["verified"] is True
@@ -825,9 +1175,7 @@ def test_apply_delete_plan_preserves_items_and_verifies_cascade(manager_module):
             )
         raise AssertionError(f"Unexpected request: {request.method} {request.url}")
 
-    with manager_module.ManageZotero(
-        transport=httpx.MockTransport(handler)
-    ) as client:
+    with manager_module.ManageZotero(transport=httpx.MockTransport(handler)) as client:
         plan = client.plan_collection_delete("PARENT23")
         receipt = client.apply_plan(
             plan,
@@ -860,9 +1208,7 @@ def test_delete_rechecks_cascade_after_authorization(manager_module):
             return root_response()
         if request.url.path == "/api/users/0/collections":
             collection_reads += 1
-            records = [
-                collection("PARENT23", version=10, name="Old Project")
-            ]
+            records = [collection("PARENT23", version=10, name="Old Project")]
             if collection_reads == 3:
                 records.append(
                     collection(
@@ -882,9 +1228,7 @@ def test_delete_rechecks_cascade_after_authorization(manager_module):
             )
         raise AssertionError(f"Unexpected request: {request.method} {request.url}")
 
-    with manager_module.ManageZotero(
-        transport=httpx.MockTransport(handler)
-    ) as client:
+    with manager_module.ManageZotero(transport=httpx.MockTransport(handler)) as client:
         plan = client.plan_collection_delete("PARENT23")
         with pytest.raises(manager_module.PlanDriftError, match="tree"):
             client.apply_plan(
@@ -893,9 +1237,7 @@ def test_delete_rechecks_cascade_after_authorization(manager_module):
                 confirm_delete="PARENT23",
             )
 
-    assert any(
-        request.url.path == "/api/local/authorize" for request in requests
-    )
+    assert any(request.url.path == "/api/local/authorize" for request in requests)
     assert not any(request.method == "DELETE" for request in requests)
 
 
@@ -933,16 +1275,12 @@ def test_apply_aborts_on_version_drift_before_authorization(manager_module):
     }
     plan = manager_module.sign_plan(unsigned)
     with (
-        manager_module.ManageZotero(
-            transport=httpx.MockTransport(handler)
-        ) as client,
+        manager_module.ManageZotero(transport=httpx.MockTransport(handler)) as client,
         pytest.raises(manager_module.PlanDriftError, match="changed"),
     ):
         client.apply_plan(plan, approval=plan["plan_id"])
 
-    assert "/api/local/authorize" not in [
-        request.url.path for request in requests
-    ]
+    assert "/api/local/authorize" not in [request.url.path for request in requests]
     assert {request.method for request in requests} == {"GET"}
 
 
@@ -1002,19 +1340,14 @@ def test_item_apply_rechecks_state_after_authorization(manager_module):
     }
     plan = manager_module.sign_plan(unsigned)
     with (
-        manager_module.ManageZotero(
-            transport=httpx.MockTransport(handler)
-        ) as client,
+        manager_module.ManageZotero(transport=httpx.MockTransport(handler)) as client,
         pytest.raises(manager_module.PlanDriftError, match="changed"),
     ):
         client.apply_plan(plan, approval=plan["plan_id"])
 
-    assert any(
-        request.url.path == "/api/local/authorize" for request in requests
-    )
+    assert any(request.url.path == "/api/local/authorize" for request in requests)
     assert not any(
-        request.method == "POST"
-        and request.url.path == "/api/users/0/items"
+        request.method == "POST" and request.url.path == "/api/users/0/items"
         for request in requests
     )
 
@@ -1038,6 +1371,163 @@ def test_authorization_stores_user_approved_remembered_key(manager_module):
     assert key == "REMEMBERED-SECRET"
     assert store.values == {"SERVER-ONE": "REMEMBERED-SECRET"}
     assert client.authorization_mode == "remembered_new"
+
+
+def test_web_authorization_validates_then_stores_without_exposing_key(
+    manager_module,
+):
+    store = FakeCredentialStore()
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        assert request.url.path == "/keys/current"
+        assert request.headers["Zotero-API-Key"] == "WEB-SECRET"
+        return web_key_response()
+
+    with manager_module.ManageZotero(
+        backend="web",
+        web_profile="research",
+        transport=httpx.MockTransport(handler),
+        credential_store=store,
+    ) as client:
+        result = client.store_web_authorization("WEB-SECRET")
+
+    assert store.values == {"research": "WEB-SECRET"}
+    assert result == {
+        "web_profile": "research",
+        "user_id": 12345,
+        "username": "Researcher",
+        "personal_library_write_access": True,
+        "stored": True,
+    }
+    assert "WEB-SECRET" not in json.dumps(result)
+    assert len(requests) == 1
+
+
+def test_cli_web_auth_store_fails_closed_without_echo_free_input(
+    manager_module,
+    monkeypatch,
+    capsys,
+):
+    fallback_read = False
+
+    def unsafe_getpass(prompt: str) -> str:
+        nonlocal fallback_read
+        warnings.warn(
+            "Can not control echo on the terminal.",
+            getpass_warning,
+            stacklevel=2,
+        )
+        fallback_read = True
+        return "MUST-NOT-BE-READ"
+
+    getpass_warning = manager_module.getpass.GetPassWarning
+    monkeypatch.setattr(manager_module.getpass, "getpass", unsafe_getpass)
+    monkeypatch.setattr(
+        manager_module,
+        "ManageZotero",
+        lambda **kwargs: pytest.fail(
+            "The CLI initialized Zotero before obtaining echo-free secret input"
+        ),
+    )
+
+    result = manager_module.main(["web-auth-store", "--web-profile", "research"])
+
+    output = capsys.readouterr().out
+    assert result == 1
+    assert fallback_read is False
+    assert "echo-free" in output
+    assert "MUST-NOT-BE-READ" not in output
+
+
+def test_rejected_web_write_preserves_profile_credential(manager_module):
+    requests: list[httpx.Request] = []
+    store = FakeCredentialStore({"research": "WEB-SECRET"})
+    current = item(
+        "ITEM2345",
+        version=12,
+        title="Paper",
+        tags=[{"tag": "unread"}],
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path == "/keys/current":
+            return web_key_response()
+        if request.url.path == "/users/12345/items/ITEM2345":
+            return httpx.Response(200, json=current)
+        if request.url.path == "/users/12345/items":
+            assert request.method == "POST"
+            return httpx.Response(403)
+        raise AssertionError(f"Unexpected request: {request.method} {request.url}")
+
+    plan = manager_module.sign_plan(
+        {
+            "schema_version": 1,
+            "action": "update_items",
+            "api_backend": "web",
+            "application_mode": "web_api",
+            "library": {"type": "user", "id": 12345},
+            "web_profile": "research",
+            "changes": [
+                {
+                    "key": "ITEM2345",
+                    "title": "Paper",
+                    "version": 12,
+                    "before": {
+                        "tags": [{"tag": "unread"}],
+                        "collections": [],
+                    },
+                    "after": {
+                        "tags": [{"tag": "reviewed"}],
+                        "collections": [],
+                    },
+                }
+            ],
+        }
+    )
+    with (
+        manager_module.ManageZotero(
+            backend="web",
+            web_profile="research",
+            transport=httpx.MockTransport(handler),
+            credential_store=store,
+        ) as client,
+        pytest.raises(manager_module.AuthorizationError, match="preserved"),
+    ):
+        client.apply_plan(plan, approval=plan["plan_id"])
+
+    assert store.values == {"research": "WEB-SECRET"}
+    assert (
+        sum(
+            request.url.path == "/users/12345/items" and request.method == "POST"
+            for request in requests
+        )
+        == 1
+    )
+
+
+def test_web_authorization_status_and_forget_are_profile_scoped(manager_module):
+    store = FakeCredentialStore({"research": "WEB-SECRET", "other": "OTHER-SECRET"})
+    with manager_module.ManageZotero(
+        backend="web",
+        web_profile="research",
+        transport=httpx.MockTransport(
+            lambda request: pytest.fail(f"Unexpected request: {request.url}")
+        ),
+        credential_store=store,
+    ) as client:
+        status = client.web_authorization_status()
+        removed = client.forget_web_authorization()
+
+    assert status == {
+        "web_profile": "research",
+        "secure_store_available": True,
+        "stored_authorization": True,
+    }
+    assert removed is True
+    assert store.values == {"other": "OTHER-SECRET"}
 
 
 def test_authorization_reuses_stored_key_without_prompt(manager_module):
@@ -1139,14 +1629,14 @@ def test_rejected_stored_key_is_forgotten_without_automatic_retry(
         client.apply_plan(plan, approval=plan["plan_id"])
 
     assert store.values == {}
-    assert not any(
-        request.url.path == "/api/local/authorize" for request in requests
+    assert not any(request.url.path == "/api/local/authorize" for request in requests)
+    assert (
+        sum(
+            request.url.path == "/api/users/0/items" and request.method == "POST"
+            for request in requests
+        )
+        == 1
     )
-    assert sum(
-        request.url.path == "/api/users/0/items"
-        and request.method == "POST"
-        for request in requests
-    ) == 1
 
 
 def test_forget_remembered_authorization_removes_only_current_server_key(
@@ -1312,12 +1802,38 @@ def test_cli_exposes_plan_and_apply_commands(manager_module):
     )
     status_args = parser.parse_args(["auth-status"])
     forget_args = parser.parse_args(["auth-forget"])
+    web_item_args = parser.parse_args(
+        [
+            "plan-items",
+            "ITEM2345",
+            "--backend",
+            "web",
+            "--web-profile",
+            "research",
+            "--add-tag",
+            "reviewed",
+            "--output",
+            "web-plan.json",
+        ]
+    )
+    web_store_args = parser.parse_args(["web-auth-store", "--web-profile", "research"])
+    web_status_args = parser.parse_args(
+        ["web-auth-status", "--web-profile", "research"]
+    )
+    web_forget_args = parser.parse_args(
+        ["web-auth-forget", "--web-profile", "research"]
+    )
 
     assert item_args.command == "plan-items"
     assert delete_args.command == "plan-collection-delete"
     assert apply_args.command == "apply"
     assert status_args.command == "auth-status"
     assert forget_args.command == "auth-forget"
+    assert web_item_args.backend == "web"
+    assert web_item_args.web_profile == "research"
+    assert web_store_args.command == "web-auth-store"
+    assert web_status_args.command == "web-auth-status"
+    assert web_forget_args.command == "web-auth-forget"
 
 
 def test_skill_declares_read_dependency_and_write_safety_contract():
@@ -1345,6 +1861,21 @@ def test_skill_declares_read_dependency_and_write_safety_contract():
     assert "Ctrl+Shift" in manage
     assert "standalone PDF attachments" in manage
     assert "does not upload local PDFs" in manage
+    assert "explicit alternative" in manage
+    assert "web-auth-store" in manage
+    assert "`/keys/current`" in manage
+    assert "personal-library write" in manage
+    assert "--backend web --web-profile research" in manage
+    assert "environment variable" in manage
+    assert "terminal echo cannot be disabled" in manage
+    assert "library-versioned multi-object collection" in manage
+
+    safety = (SKILL / "references" / "write-safety.md").read_text(encoding="utf-8")
+    assert "https://api.zotero.org/" in safety
+    assert "Zotero-Write-Token" in safety
+    assert "versioned writes" in safety
+    assert "Group permissions do not substitute" in safety
+    assert "preserve the selected stored profile" in safety
 
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
     assert '"keyring>=' in pyproject
