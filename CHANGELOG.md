@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-29
+
 ### Added
 - **`manage-zotero-library`** accepts reviewed per-item JSON manifests, supports
   one atomic Web API plan for multiple independent collection deletions, and
