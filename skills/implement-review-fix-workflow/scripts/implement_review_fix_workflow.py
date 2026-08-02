@@ -129,12 +129,11 @@ Target paths:
 {fix_context}
 Write your report to: {report_path}
 
-Required superpowers skills when applicable:
-- writing-plans
-- test-driven-development
-- systematic-debugging
-- verification-before-completion
-- writing-skills
+Required skills when applicable:
+- skill-creator
+
+Before reporting completion, run the verification commands and quote their
+output. Do not claim success without evidence.
 
 The report must contain `## Skills used` and all implementer report sections.
 """
@@ -150,9 +149,11 @@ Task: {task}
 Implementation report: {implementation_report}
 Write your report to: {report_path}
 
-Required superpowers skills when applicable:
-- requesting-code-review
-- verification-before-completion
+Required skills when applicable:
+- skill-creator
+
+Verify claims against actual command output rather than against the
+implementer's summary.
 
 Do not modify files. The runner will compare git snapshots before and after
 your command and fail if files changed.

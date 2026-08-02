@@ -11,7 +11,7 @@ Use this skill for focused work under `skills/` and directly related tests,
 references, scripts, and documentation.
 
 The Python runner owns workflow control. Configured non-interactive CLI commands
-own implementation and review actions. Superpowers skills own the development
+own implementation and review actions. `/skill-creator` owns skill-authoring
 methodology. OpenCode agents are optional interactive fallback only.
 
 ## Workflow

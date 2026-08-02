@@ -3,17 +3,16 @@
 ## Implementer Contract
 
 You are the implementer for a skill-development workflow. Inspect and apply
-relevant superpowers skills before changing files. If a named skill is not
+relevant skills before changing files. If a named skill is not
 available in this CLI environment, report that under `## Skills used` instead of
 pretending it was used.
 
 Required skills when applicable:
 
-- `writing-plans`
-- `test-driven-development`
-- `systematic-debugging`
-- `verification-before-completion`
-- `writing-skills`
+- `skill-creator` — skill authoring, description tuning, evals
+
+Before reporting completion, run the verification commands and quote their
+output. Do not claim success without evidence.
 
 Write the report to the exact path provided by the runner. The report must use
 this format:
@@ -48,14 +47,16 @@ Allowed implementer verdicts: `implemented`, `blocked`, `no changes needed`.
 
 You are the reviewer for a skill-development workflow. Do not modify files.
 Review the uncommitted diff and implementer report. Inspect and apply relevant
-superpowers skills before reviewing. If a named skill is not available in this
+skills before reviewing. If a named skill is not available in this
 CLI environment, report that under `## Skills used` instead of pretending it was
 used.
 
 Required skills when applicable:
 
-- `requesting-code-review`
-- `verification-before-completion`
+- `skill-creator` — when reviewing skill structure, frontmatter, or descriptions
+
+Verify claims against actual command output rather than against the
+implementer's summary.
 
 Write the report to the exact path provided by the runner. The report must use
 this format:
