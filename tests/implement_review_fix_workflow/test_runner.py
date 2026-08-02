@@ -133,9 +133,10 @@ def test_dry_run_writes_prompts_without_invoking_commands(tmp_path):
     reviewer_prompt = (result.run_dir / "reviewer-1-prompt.md").read_text(
         encoding="utf-8"
     )
-    assert "writing-skills" in implementer_prompt
-    assert "verification-before-completion" in implementer_prompt
-    assert "requesting-code-review" in reviewer_prompt
+    assert "- skill-creator" in implementer_prompt
+    assert "run the verification commands" in implementer_prompt
+    assert "- skill-creator" in reviewer_prompt
+    assert "actual command output" in reviewer_prompt
     assert "## Skills used" in reviewer_prompt
 
 
