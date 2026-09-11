@@ -105,9 +105,10 @@ python -m pip install httpx beautifulsoup4
 
 ### `query-zotero-library`
 
-Searches a researcher's own Zotero library through the official read-only Local
-API, locates local PDF attachments across macOS, Windows, and Linux, and
-extracts relevant pages for source-grounded answers. It can also read child
+Searches a researcher's own Zotero library through read-only requests to the
+official Zotero Local API, locates local PDF attachments across
+macOS, Windows, and Linux, and extracts relevant pages for source-grounded
+answers. It can also read child
 notes and PDF annotations without modifying them. It requires Zotero Desktop to
 be running with local application access enabled. A project can optionally name
 a preferred Zotero collection in its agent instructions; otherwise the skill

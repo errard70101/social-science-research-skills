@@ -1,6 +1,6 @@
 ---
 name: query-zotero-library
-description: Retrieve and synthesize evidence from the user's own Zotero library through Zotero's official read-only Local API. Use when asked to find, compare, summarize, or answer research questions from papers and PDFs the user has collected in Zotero, especially while working inside a research repository. Supports optional collection hints and relevant-page extraction without Web API keys, third-party MCP servers, library writes, or vector indexing.
+description: Retrieve and synthesize evidence from the user's own Zotero library through read-only requests to Zotero's official Local API. Use when asked to find, compare, summarize, or answer research questions from papers and PDFs the user has collected in Zotero, especially while working inside a research repository. Supports optional collection hints and relevant-page extraction without Web API keys, third-party MCP servers, library writes, or vector indexing.
 metadata:
   capabilities: [zotero-read]
 ---
