@@ -166,6 +166,25 @@ Runtime dependency:
 python -m pip install "httpx>=0.27" "keyring>=25.0"
 ```
 
+### `annotate-zotero-pdf`
+
+Creates Zotero-native highlights and underlines in PDFs already attached to a
+personal library. A JSON manifest can describe up to 50 marks, including exact
+passages, colors, comments, and tags. The helper prepares a GET-only plan,
+requests one exact approval for the whole batch rather than one confirmation
+per mark, submits one versioned Local API write, and verifies every annotation
+by reading it back. It does not import PDFs, use OCR, or edit/delete existing
+annotations.
+
+Installing this skill also installs `manage-zotero-library` for secure Local
+API authorization and the `zotero-read` provider for target discovery.
+
+Runtime dependencies:
+
+```bash
+python -m pip install "httpx>=0.27" "keyring>=25.0" "pymupdf>=1.24"
+```
+
 ### `implement-review-fix-workflow`
 
 An Agentic CI/CD engine that runs a non-interactive implementation and review loop. It coordinates a maker (implementer) and a checker (reviewer) to autonomously develop, refine, and verify repository skills or tasks until they pass review.

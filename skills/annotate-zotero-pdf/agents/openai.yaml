@@ -1,0 +1,4 @@
+interface:
+  display_name: "Annotate Zotero PDF"
+  short_description: "Plan and apply verified PDF annotation batches"
+  default_prompt: "Use $annotate-zotero-pdf to create Zotero-native highlights or underlines from exact PDF passages. Present one reviewed batch plan ID for up to 50 annotations instead of asking for approval one annotation at a time, then apply only that unchanged plan and verify every created annotation."

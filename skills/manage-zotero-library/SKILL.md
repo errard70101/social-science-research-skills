@@ -31,6 +31,8 @@ Supported:
 
 Not supported:
 
+- Creating PDF highlights or underlines. Use `annotate-zotero-pdf` for a
+  separately reviewed annotation batch.
 - The bundled helper does not upload local PDFs, create attachments, or retrieve
   bibliographic metadata for new PDF files.
 - Never delete Zotero items or attachments.

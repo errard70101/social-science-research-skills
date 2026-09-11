@@ -120,3 +120,22 @@ def test_manage_zotero_pulls_in_read_capability_provider(
         "query-zotero-library",
     ]
     assert warnings == []
+
+
+def test_annotate_zotero_pulls_in_management_and_read_skills(
+    install_module,
+):
+    skills_root = Path(install_module.__file__).resolve().parents[1] / "skills"
+    selected = [skills_root / "annotate-zotero-pdf"]
+
+    expanded, warnings = install_module.resolve_dependencies(
+        selected,
+        skills_root,
+    )
+
+    assert [path.name for path in expanded] == [
+        "annotate-zotero-pdf",
+        "manage-zotero-library",
+        "query-zotero-library",
+    ]
+    assert warnings == []

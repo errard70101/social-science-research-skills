@@ -210,3 +210,9 @@ def test_repec_runtime_dependency_is_packaged():
     pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
 
     assert '"beautifulsoup4' in pyproject
+
+
+def test_zotero_annotation_runtime_dependency_is_packaged():
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+
+    assert '"pymupdf>=1.24"' in pyproject
