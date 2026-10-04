@@ -21,6 +21,7 @@ MAX_BATCH_ANNOTATIONS = 50
 PLAN_SCHEMA_VERSION = 1
 ANNOTATION_TYPES = {"highlight", "underline"}
 COLOR_PATTERN = re.compile(r"^#[0-9a-fA-F]{6}$")
+PDF_HEX_STRING_PATTERN = re.compile(r"<([0-9a-fA-F\s]*)>")
 ALLOWED_MANIFEST_FIELDS = {
     "attachment_key",
     "page",
@@ -193,6 +194,23 @@ def normalize_manifest(manifest: object) -> list[dict[str, object]]:
             }
         )
     return normalized
+
+
+def decode_pdf_page_label(label: str) -> str:
+    """Decode PDF hex-string segments that PyMuPDF returns verbatim in labels."""
+
+    def decode(match: re.Match[str]) -> str:
+        digits = re.sub(r"\s", "", match.group(1))
+        if len(digits) % 2:
+            digits += "0"
+        raw = bytes.fromhex(digits)
+        if raw.startswith(b"\xfe\xff"):
+            return raw[2:].decode("utf-16-be")
+        if raw.startswith(b"\xef\xbb\xbf"):
+            return raw[3:].decode("utf-8")
+        return raw.decode("latin-1")
+
+    return PDF_HEX_STRING_PATTERN.sub(decode, label)
 
 
 def validate_page_geometry(page: object) -> dict[str, float]:
@@ -536,7 +554,7 @@ class AnnotateZotero(_manager.ManageZotero):
                 math.floor(geometry["crop_y"] + first_top_left_rect[1]),
             )
             character_offset = min(int(located["character_offset"]), 999999)
-            page_label = page.get_label() or str(page_number)
+            page_label = decode_pdf_page_label(page.get_label()) or str(page_number)
             if page_number - 1 > 99999 or top > 99999:
                 raise ValueError("PDF annotation sort index exceeds Zotero limits")
 

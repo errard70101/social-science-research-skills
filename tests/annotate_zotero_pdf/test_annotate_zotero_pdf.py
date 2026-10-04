@@ -254,6 +254,29 @@ def test_pdf_page_label_is_preserved_for_zotero(annotation_module, tmp_path):
     )
 
 
+def test_hex_encoded_pdf_page_label_is_decoded(annotation_module, tmp_path):
+    path = tmp_path / "hex-labeled.pdf"
+    document = pymupdf.open()
+    page = document.new_page(width=300, height=400)
+    page.insert_text((40, 80), "Policy effects are persistent.")
+    document.xref_set_key(
+        document.pdf_catalog(),
+        "PageLabels",
+        "<</Nums [0 <</P <FEFF0053003100330031>>>]>>",
+    )
+    document.save(path)
+    document.close()
+    snapshot = {"path": str(path)}
+
+    planned = annotation_module.AnnotateZotero._pdf_annotation(
+        annotation_module.normalize_manifest([manifest_entry()])[0],
+        snapshot,
+    )
+
+    assert planned["page_label"] == "S131"
+    assert annotation_module.decode_pdf_page_label("<4142>-3") == "AB-3"
+
+
 def test_missing_and_ambiguous_passages_are_rejected(
     annotation_module,
     tmp_path,
