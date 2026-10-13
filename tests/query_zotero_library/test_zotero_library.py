@@ -594,9 +594,11 @@ def test_notes_and_annotations_returns_readable_context(zotero_module):
                     "comment": "Compare with placebo.",
                     "color": "#ffd400",
                     "page_label": "12",
+                    "pdf_page": None,
                     "sort_index": "00012|000001",
                     "tags": ["identification"],
                     "date_modified": "2026-07-29T00:01:00Z",
+                    "open_uri": None,
                 }
             ],
         }
@@ -853,6 +855,145 @@ def test_extract_pdf_rejects_blank_query_and_warns_when_nothing_matches(
     assert any("No pages matched" in warning for warning in result["warnings"])
 
 
+def test_build_open_pdf_uri_uses_one_based_page_and_annotation(zotero_module):
+    assert zotero_module.build_open_pdf_uri("pdfattch") == (
+        "zotero://open-pdf/library/items/PDFATTCH"
+    )
+    assert zotero_module.build_open_pdf_uri("PDFATTCH", page=12) == (
+        "zotero://open-pdf/library/items/PDFATTCH?page=12"
+    )
+    assert zotero_module.build_open_pdf_uri(
+        "PDFATTCH",
+        page=8,
+        annotation_key="hlghtkey",
+    ) == "zotero://open-pdf/library/items/PDFATTCH?page=8&annotation=HLGHTKEY"
+
+
+@pytest.mark.parametrize(
+    ("attachment_key", "page", "annotation_key", "message"),
+    [
+        ("BAD", None, None, "Attachment key"),
+        ("PDFATTCH&x", None, None, "Attachment key"),
+        ("PDFATTCH", 0, None, "positive"),
+        ("PDFATTCH", True, None, "positive"),
+        ("PDFATTCH", 3, "nope", "Annotation key"),
+    ],
+)
+def test_build_open_pdf_uri_rejects_invalid_parts(
+    zotero_module,
+    attachment_key,
+    page,
+    annotation_key,
+    message,
+):
+    with pytest.raises(ValueError, match=message):
+        zotero_module.build_open_pdf_uri(
+            attachment_key,
+            page=page,
+            annotation_key=annotation_key,
+        )
+
+
+@pytest.mark.parametrize(
+    ("platform", "command"),
+    [("darwin", "open"), ("linux", "xdg-open")],
+)
+def test_open_zotero_uri_uses_platform_opener(zotero_module, platform, command):
+    calls = []
+    uri = "zotero://open-pdf/library/items/PDFATTCH?page=3"
+
+    zotero_module.open_zotero_uri(
+        uri,
+        platform=platform,
+        runner=lambda args, **kwargs: calls.append((args, kwargs)),
+    )
+
+    assert calls[0][0] == [command, uri]
+    assert calls[0][1]["check"] is True
+
+
+def test_open_zotero_uri_uses_startfile_on_windows(zotero_module):
+    opened = []
+    uri = "zotero://open-pdf/library/items/PDFATTCH?page=3"
+
+    zotero_module.open_zotero_uri(
+        uri,
+        platform="win32",
+        runner=lambda *args, **kwargs: pytest.fail("runner should not run"),
+        startfile=opened.append,
+    )
+
+    assert opened == [uri]
+
+
+@pytest.mark.parametrize(
+    "uri",
+    [
+        "https://example.org/",
+        "file:///etc/passwd",
+        "zotero://select/library/items/PDFATTCH",
+    ],
+)
+def test_open_zotero_uri_rejects_other_uris(zotero_module, uri):
+    with pytest.raises(ValueError, match="open-pdf"):
+        zotero_module.open_zotero_uri(
+            uri,
+            platform="darwin",
+            runner=lambda *args, **kwargs: pytest.fail("runner should not run"),
+        )
+
+
+def test_annotation_open_uri_targets_page_and_highlight(zotero_module):
+    annotation = zotero_module.LocalZotero._format_annotation(
+        {
+            "key": "HLGHTKEY",
+            "data": {
+                "itemType": "annotation",
+                "annotationType": "highlight",
+                "annotationPageLabel": "368",
+                "annotationPosition": json.dumps(
+                    {"pageIndex": 7, "rects": [[1, 2, 3, 4]]}
+                ),
+            },
+        }
+    )
+
+    assert annotation["page_label"] == "368"
+    assert annotation["pdf_page"] == 8
+    assert zotero_module._annotation_open_uri("PDFATTCH", annotation) == (
+        "zotero://open-pdf/library/items/PDFATTCH?page=8&annotation=HLGHTKEY"
+    )
+
+
+def test_main_link_prints_uri_and_opens_only_on_request(
+    zotero_module,
+    monkeypatch,
+    capsys,
+):
+    opened = []
+    monkeypatch.setattr(zotero_module, "open_zotero_uri", opened.append)
+
+    assert zotero_module.main(["link", "PDFATTCH", "--page", "12"]) == 0
+    first = json.loads(capsys.readouterr().out)
+    assert first == {
+        "uri": "zotero://open-pdf/library/items/PDFATTCH?page=12",
+        "opened": False,
+    }
+    assert opened == []
+
+    assert zotero_module.main(
+        ["link", "PDFATTCH", "--page", "8", "--annotation", "HLGHTKEY", "--open"]
+    ) == 0
+    second = json.loads(capsys.readouterr().out)
+    assert second["opened"] is True
+    assert opened == [second["uri"]]
+
+
+def test_main_link_reports_invalid_page_as_json(zotero_module, capsys):
+    assert zotero_module.main(["link", "PDFATTCH", "--page", "0"]) == 1
+    assert "positive" in json.loads(capsys.readouterr().out)["error"]
+
+
 def test_cli_exposes_collections_and_optional_extract_query(zotero_module):
     parser = zotero_module.build_parser()
 
@@ -925,6 +1066,8 @@ def test_skill_documents_zero_config_read_only_evidence_contract():
     assert "PyMuPDF" in text
     assert "Do not use `find`" in text
     assert "decoded `path`" in text
+    assert "zotero://open-pdf" in text
+    assert "link ... --open" in text
 
 
 def test_readme_lists_query_zotero_library():

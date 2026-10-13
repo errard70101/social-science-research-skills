@@ -96,6 +96,28 @@ Before running a bundled script, locate this skill directory and assign its abso
    and `fallback_pages`; `mixed` or `pymupdf` means the optional PyMuPDF
    fallback supplied text that `pypdf` could not reliably extract.
 9. Answer from the retrieved page text, not from titles or search matches alone.
+10. Give each supported claim an evidence link that opens the PDF page in
+    Zotero. Build it from the attachment `key` returned by `search` and the
+    one-based `page_number` returned by `extract`:
+
+    ```bash
+    python "$SKILL_DIR/scripts/zotero_library.py" link ATTACH01 --page 12
+    ```
+
+    Annotations returned by `annotations` already include `pdf_page` and
+    `open_uri`; reuse that `open_uri` to jump to the exact highlight.
+
+## Evidence Links
+
+- In chat, show each link in inline code, such as
+  `zotero://open-pdf/library/items/ATTACH01?page=12`, because some chat
+  interfaces strip non-web Markdown links.
+- When the user wants to see the evidence now, open it for them with
+  `link ... --open`. Zotero Desktop jumps to the page, or to the highlight when
+  `--annotation` is given.
+- When writing a note, report, or Markdown file, use ordinary Markdown links,
+  such as `[Author Year, PDF p. 12](zotero://open-pdf/...)`, so the user can
+  click back to the source later.
 
 ## Search Scope
 
@@ -115,7 +137,7 @@ collection in project instructions; never make that configuration mandatory.
 
 - Treat a metadata match as a candidate, not evidence for a substantive claim.
 - For each supported claim, identify author, year, title, Zotero item key, and
-  the extracted PDF page when available.
+  the extracted PDF page when available, with its `zotero://open-pdf` link.
 - Label extracted page numbers as PDF pages because they may differ from printed
   journal pagination.
 - Treat annotation `page_label` as Zotero's displayed page label, which may
@@ -141,6 +163,8 @@ collection in project instructions; never make that configuration mandatory.
 - Do not request, store, or use a Zotero Web API key.
 - Do not add, edit, move, tag, merge, or delete Zotero items or attachments.
 - Do not read or write `zotero.sqlite` directly.
+- Open only `zotero://open-pdf` links built by the bundled `link` command.
+  Never open other URIs, files, or applications.
 - Do not use a third-party Zotero MCP server.
 - Do not create embeddings, a vector database, or a persistent full-text index.
 - Do not construct OS-specific Zotero paths. Use only attachment paths returned

@@ -113,6 +113,8 @@ notes and PDF annotations without modifying them. It requires Zotero Desktop to
 be running with local application access enabled. A project can optionally name
 a preferred Zotero collection in its agent instructions; otherwise the skill
 searches the whole personal library.
+Each cited claim can carry a `zotero://open-pdf` link that opens the PDF page,
+or the exact highlight, in Zotero Desktop; the agent can open it on request.
 It does not use Zotero Web API keys, third-party Zotero MCP servers, Zotero
 writes, direct SQLite access, or vector indexing.
 

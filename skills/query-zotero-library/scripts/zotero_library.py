@@ -6,11 +6,13 @@ import ipaddress
 import json
 import os
 import re
+import subprocess
+import sys
 import unicodedata
 from contextlib import suppress
 from html.parser import HTMLParser
 from pathlib import Path, PureWindowsPath
-from urllib.parse import unquote, urlsplit
+from urllib.parse import unquote, urlencode, urlsplit
 
 import httpx
 from pypdf import PdfReader
@@ -30,6 +32,7 @@ COLLECTION_KEY_PATTERN = re.compile(
     flags=re.IGNORECASE,
 )
 ITEM_KEY_PATTERN = COLLECTION_KEY_PATTERN
+OPEN_PDF_URI_PREFIX = "zotero://open-pdf/library/items/"
 
 
 class ZoteroError(RuntimeError):
@@ -117,6 +120,71 @@ def file_url_to_path(file_url: str, *, platform: str | None = None) -> str:
     if not decoded_path.startswith("/"):
         raise ValueError("Attachment file URL must contain an absolute path")
     return decoded_path
+
+
+def _normalize_item_key(value: str, *, label: str) -> str:
+    key = value.strip().upper()
+    if not ITEM_KEY_PATTERN.fullmatch(key):
+        raise ValueError(f"{label} must be an eight-character Zotero key")
+    return key
+
+
+def build_open_pdf_uri(
+    attachment_key: str,
+    *,
+    page: int | None = None,
+    annotation_key: str | None = None,
+) -> str:
+    """Build a zotero:// URI that opens a personal-library PDF in Zotero.
+
+    ``page`` is the one-based PDF page, not the printed journal page.
+    """
+    key = _normalize_item_key(attachment_key, label="Attachment key")
+    params: dict[str, object] = {}
+    if page is not None:
+        if isinstance(page, bool) or not isinstance(page, int) or page < 1:
+            raise ValueError("PDF page must be a positive one-based integer")
+        params["page"] = page
+    if annotation_key is not None:
+        params["annotation"] = _normalize_item_key(
+            annotation_key,
+            label="Annotation key",
+        )
+    query = f"?{urlencode(params)}" if params else ""
+    return f"{OPEN_PDF_URI_PREFIX}{key}{query}"
+
+
+def open_zotero_uri(
+    uri: str,
+    *,
+    platform: str | None = None,
+    runner=subprocess.run,
+    startfile=None,
+) -> None:
+    """Ask the operating system to hand a zotero://open-pdf URI to Zotero."""
+    if not uri.startswith(OPEN_PDF_URI_PREFIX):
+        raise ValueError("Only zotero://open-pdf URIs can be opened")
+    platform = platform or sys.platform
+    if platform.startswith("win"):
+        (startfile or os.startfile)(uri)
+        return
+    command = "open" if platform == "darwin" else "xdg-open"
+    runner([command, uri], check=True, capture_output=True, timeout=10)
+
+
+def _annotation_pdf_page(data: dict[str, object]) -> int | None:
+    position = data.get("annotationPosition")
+    if isinstance(position, str):
+        try:
+            position = json.loads(position)
+        except json.JSONDecodeError:
+            return None
+    if not isinstance(position, dict):
+        return None
+    page_index = position.get("pageIndex")
+    if isinstance(page_index, bool) or not isinstance(page_index, int):
+        return None
+    return page_index + 1 if page_index >= 0 else None
 
 
 def _collection_name(collection: dict[str, object]) -> str:
@@ -641,6 +709,8 @@ class LocalZotero:
                 continue
             key = str(attachment.get("key") or "")
             attachment_annotations = annotations_by_attachment.get(key, [])
+            for annotation in attachment_annotations:
+                annotation["open_uri"] = _annotation_open_uri(key, annotation)
             attachment_annotations.sort(
                 key=lambda value: (
                     str(value["sort_index"]),
@@ -695,6 +765,7 @@ class LocalZotero:
             "comment": data.get("annotationComment") or "",
             "color": data.get("annotationColor") or "",
             "page_label": data.get("annotationPageLabel") or "",
+            "pdf_page": _annotation_pdf_page(data),
             "sort_index": data.get("annotationSortIndex") or "",
             "tags": _tags(data),
             "date_modified": data.get("dateModified") or "",
@@ -740,6 +811,21 @@ class LocalZotero:
                 "on this computer"
             )
         return result
+
+
+def _annotation_open_uri(
+    attachment_key: str,
+    annotation: dict[str, object],
+) -> str | None:
+    pdf_page = annotation.get("pdf_page")
+    try:
+        return build_open_pdf_uri(
+            attachment_key,
+            page=pdf_page if isinstance(pdf_page, int) else None,
+            annotation_key=str(annotation.get("key") or ""),
+        )
+    except ValueError:
+        return None
 
 
 def _query_terms(query: str | None) -> list[str]:
@@ -942,6 +1028,29 @@ def build_parser() -> argparse.ArgumentParser:
         help="Eight-character Zotero bibliographic item or PDF attachment key",
     )
 
+    link_parser = subparsers.add_parser(
+        "link",
+        help="Build, and optionally open, a zotero://open-pdf evidence link",
+    )
+    link_parser.add_argument(
+        "attachment_key",
+        help="Eight-character Zotero PDF attachment key",
+    )
+    link_parser.add_argument(
+        "--page",
+        type=int,
+        help="One-based PDF page, as reported by extract",
+    )
+    link_parser.add_argument(
+        "--annotation",
+        help="Optional annotation key to select a highlight on that page",
+    )
+    link_parser.add_argument(
+        "--open",
+        action="store_true",
+        help="Open the link in Zotero Desktop on this computer",
+    )
+
     search_parser = subparsers.add_parser(
         "search",
         help="Search Zotero metadata and indexed full text",
@@ -995,7 +1104,16 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     try:
-        if args.command == "extract":
+        if args.command == "link":
+            uri = build_open_pdf_uri(
+                args.attachment_key,
+                page=args.page,
+                annotation_key=args.annotation,
+            )
+            if args.open:
+                open_zotero_uri(uri)
+            result = {"uri": uri, "opened": args.open}
+        elif args.command == "extract":
             result = extract_pdf(
                 args.path,
                 query=args.query,
@@ -1034,6 +1152,9 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     except PyPdfError as exc:
         print_json({"error": f"Cannot read PDF: {exc}"})
+        return 1
+    except subprocess.SubprocessError as exc:
+        print_json({"error": f"Cannot open Zotero link: {exc}"})
         return 1
     except (OSError, ValueError, ZoteroError) as exc:
         print_json({"error": str(exc)})
